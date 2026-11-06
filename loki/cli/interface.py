@@ -115,7 +115,11 @@ class LokiConversationalCLI:
 
         elif sub == "/model":
             if not arg:
-                selected = choose_model_interactive(current_model=self.model_name)
+                selected = choose_model_interactive(
+                    current_model=self.model_name,
+                    api_key=settings.nvidia_nim_api_key,
+                    base_url=settings.nvidia_nim_base_url,
+                )
                 self.model_name = selected
             else:
                 self.model_name = arg

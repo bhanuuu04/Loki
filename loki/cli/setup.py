@@ -62,8 +62,7 @@ async def run_setup_wizard(reset: bool = False):
         console.print("Get your API key at: [link=https://build.nvidia.com]https://build.nvidia.com[/link]\n")
 
         api_key = Prompt.ask(
-            "Enter your NVIDIA NIM API Key",
-            password=True,
+            "Enter your NVIDIA NIM API Key (e.g. nvapi-...)",
             default=settings.nvidia_nim_api_key or "",
         ).strip()
 
@@ -72,8 +71,13 @@ async def run_setup_wizard(reset: bool = False):
             default=settings.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
         ).strip()
 
-        # Arrow-key navigable model selection!
-        model_id = choose_model_interactive(current_model=settings.nvidia_nim_model or "meta/llama-3.3-70b-instruct")
+        # Arrow-key navigable model selection with live discovery
+        console.print("\n[dim]Loading available models...[/dim]")
+        model_id = choose_model_interactive(
+            current_model=settings.nvidia_nim_model or "meta/llama-3.3-70b-instruct",
+            api_key=api_key,
+            base_url=base_url,
+        )
 
         env_updates["NVIDIA_NIM_API_KEY"] = api_key
         env_updates["NVIDIA_NIM_BASE_URL"] = base_url
