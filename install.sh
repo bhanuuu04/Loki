@@ -25,7 +25,7 @@ elif command -v python >/dev/null 2>&1; then
 else
     echo "[-] Python3 is not installed. Installing via package manager..."
     if command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv
+        sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv python3-full
         PYTHON_CMD="python3"
     else
         echo "[-] Please install Python 3.10+ and re-run."
@@ -51,10 +51,34 @@ else
     echo "      Preserved existing .env configuration"
 fi
 
-# 5. Install Dependencies
-echo "[5/8] Installing dependencies..."
-$PYTHON_CMD -m pip install --quiet --upgrade pip
-$PYTHON_CMD -m pip install -e .
+# 5. Handle Virtual Environment (PEP 668 on Debian/Kali)
+echo "[5/8] Setting up isolated Python environment..."
+VENV_DIR=".venv"
+PIP_FLAGS=""
+
+if [ ! -d "$VENV_DIR" ]; then
+    if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
+        echo "      Installing python3-venv package via apt..."
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y python3-venv python3-full
+            $PYTHON_CMD -m venv "$VENV_DIR"
+        fi
+    fi
+fi
+
+if [ -f "$VENV_DIR/bin/python" ]; then
+    RUN_PYTHON="$VENV_DIR/bin/python"
+    RUN_PIP="$VENV_DIR/bin/pip"
+    echo "      Using virtual environment: $VENV_DIR"
+else
+    RUN_PYTHON="$PYTHON_CMD"
+    RUN_PIP="$PYTHON_CMD -m pip"
+    PIP_FLAGS="--break-system-packages"
+    echo "      Using system Python with fallback flags"
+fi
+
+$RUN_PIP install --upgrade pip --quiet $PIP_FLAGS 2>/dev/null || true
+$RUN_PIP install -e . --quiet $PIP_FLAGS
 
 # 6. Check Container Runtimes & Security Tools
 echo "[6/8] Checking environment capabilities..."
@@ -70,7 +94,7 @@ fi
 
 # 7. Verification Check
 echo "[7/8] Running Loki diagnostic verification..."
-$PYTHON_CMD -m loki.cli.main doctor
+$RUN_PYTHON -m loki.cli.main doctor
 
 # 8. Complete
 echo ""
@@ -79,7 +103,7 @@ echo "          INSTALLATION COMPLETE!                  "
 echo "=================================================="
 echo ""
 echo "Launch Loki with:"
-echo "  python3 -m loki.cli.main start      # Starts Web UI on http://127.0.0.1:8000"
-echo "  python3 -m loki.cli.main chat       # Interactive Terminal REPL"
-echo "  python3 -m loki.cli.main doctor     # Run System Health Diagnostic"
+echo "  ./loki.sh                         # Interactive Hermes-style chat"
+echo "  ./loki.sh start                   # Starts Web UI on http://127.0.0.1:8000"
+echo "  ./loki.sh doctor                  # Run System Health Diagnostic"
 echo ""
