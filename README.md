@@ -4,35 +4,36 @@
 
 ---
 
-## ⚡ 30-Second Quickstart
+## ⚡ Quickstart (Clone, Setup & Chat)
 
-### 1. Clone the Repository
+### 1. Clone & Install
 ```bash
 git clone https://github.com/bhanuuu04/Loki.git
 cd Loki
+
+# On Kali Linux / Debian / Ubuntu:
+pip install -e . --break-system-packages
+
+# On Windows / macOS:
+pip install -e .
 ```
 
 ### 2. Run Setup
-**On Windows:**
-```powershell
-.\setup.bat
-```
-**On Linux / macOS:**
 ```bash
-chmod +x setup.sh && ./setup.sh
+loki setup
 ```
-*The interactive wizard will prompt for your LLM provider (NVIDIA NIM [recommended], Gemini, OpenAI, or offline Mock) and API key, and configure `.env` automatically.*
+*(Interactive wizard: enter your API key and use **↑/↓ arrow keys** to select your model).*
 
 ### 3. Start Chatting with Loki!
-**On Windows:**
-```powershell
-.\loki.bat
-```
-**On Linux / macOS:**
 ```bash
-chmod +x loki.sh && ./loki.sh
+loki
 ```
-*(Or simply type `loki` if installed on your PATH).*
+
+---
+
+### Alternative: Convenience Scripts (No Pip Flags Needed)
+- **Linux / Kali Linux:** Run `./setup.sh` then `./loki.sh` *(already marked executable in git — no `chmod` needed)*.
+- **Windows:** Run `.\setup.bat` then `.\loki.bat`.
 
 ---
 
