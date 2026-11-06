@@ -4,6 +4,38 @@
 
 ---
 
+## ⚡ 30-Second Quickstart
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/bhanuuu04/Loki.git
+cd Loki
+```
+
+### 2. Run Setup
+**On Windows:**
+```powershell
+.\setup.bat
+```
+**On Linux / macOS:**
+```bash
+chmod +x setup.sh && ./setup.sh
+```
+*The interactive wizard will prompt for your LLM provider (NVIDIA NIM [recommended], Gemini, OpenAI, or offline Mock) and API key, and configure `.env` automatically.*
+
+### 3. Start Chatting with Loki!
+**On Windows:**
+```powershell
+.\loki.bat
+```
+**On Linux / macOS:**
+```bash
+chmod +x loki.sh && ./loki.sh
+```
+*(Or simply type `loki` if installed on your PATH).*
+
+---
+
 ## Architecture Overview
 
 ```

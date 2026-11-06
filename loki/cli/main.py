@@ -245,7 +245,27 @@ def cli_entrypoint():
         console.print("")
 
     else:
-        # Default behavior when running `loki` without arguments: Launch Conversational Interface
+        # Default behavior when running `loki` without arguments:
+        # Check if first-run setup is recommended
+        env_file = Path.cwd() / ".env"
+        if not env_file.exists():
+            console.print(
+                Panel(
+                    "[bold green]Welcome to Loki![/bold green] It looks like this is your first time running.\n"
+                    "Let's configure your AI provider (NVIDIA NIM, Gemini, OpenAI, or offline Mock).",
+                    title="[bold cyan]First-Run Welcome[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
+            from rich.prompt import Confirm
+            try:
+                run_wizard = Confirm.ask("Would you like to run the setup wizard now?", default=True)
+                if run_wizard:
+                    asyncio.run(run_setup_wizard())
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[dim]Skipping setup wizard.[/dim]")
+
+        # Launch Conversational Interface
         cli = LokiConversationalCLI()
         asyncio.run(cli.start())
 
