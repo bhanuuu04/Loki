@@ -6,6 +6,8 @@ import asyncio
 import os
 import sys
 import time
+import re
+from typing import Any, Dict
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -48,6 +50,7 @@ class LokiConversationalCLI:
         self.session_id = f"cli_{int(time.time())}"
         self.total_tokens_used = 0
         self.turn_count = 0
+        self._status_spinner = None
 
         self.scope_manager = ScopeManager(
             ScopeConfig(
@@ -62,21 +65,98 @@ class LokiConversationalCLI:
         )
         self.agent.add_listener(self._on_agent_event)
 
+    def _format_tool_call(self, tname: str, args: Dict[str, Any]) -> str:
+        """Formats tool invocation into a clean human-readable action."""
+        if tname == "run_command":
+            cmd = args.get("command", "")
+            return f"[bold cyan]⚡ Shell Command:[/bold cyan] [bold white]$ {cmd}[/bold white]"
+        elif tname == "python_exec":
+            code = args.get("code", "").strip()
+            lines = [l for l in code.splitlines() if l.strip()]
+            preview = lines[0][:75] if len(lines) == 1 else f"{len(lines)} lines of Python"
+            return f"[bold cyan]⚡ Python Script:[/bold cyan] [dim]{preview}[/dim]"
+        elif tname == "enumerate_subdomains":
+            domain = args.get("domain", "")
+            return f"[bold cyan]⚡ Subdomain Reconnaissance:[/bold cyan] [bold white]{domain}[/bold white]"
+        elif tname == "dns_lookup":
+            domain = args.get("domain", "")
+            return f"[bold cyan]⚡ DNS Query:[/bold cyan] [bold white]{domain}[/bold white]"
+        elif tname == "search_security_tool_catalog":
+            query = args.get("query", "")
+            return f"[bold cyan]⚡ Tool Catalog Search:[/bold cyan] [bold white]'{query}'[/bold white]"
+        elif tname == "audit_http_security_headers":
+            url = args.get("url", "")
+            return f"[bold cyan]⚡ Auditing Headers:[/bold cyan] [bold white]{url}[/bold white]"
+        elif tname == "check_scope_authorization":
+            target = args.get("target", "")
+            return f"[bold cyan]⚡ Scope Check:[/bold cyan] [bold white]{target}[/bold white]"
+        elif tname == "record_security_finding":
+            title = args.get("title", "")
+            sev = args.get("severity", "")
+            return f"[bold cyan]⚡ Recording Finding:[/bold cyan] [bold yellow][{sev.upper()}][/bold yellow] [bold white]{title}[/bold white]"
+        else:
+            compact = ", ".join(f"{k}={repr(v)[:40]}" for k, v in args.items())
+            return f"[bold cyan]⚡ Tool ({tname}):[/bold cyan] [dim]{compact}[/dim]"
+
+    def _format_tool_result(self, tname: str, output: Any, time_ms: float) -> str:
+        """Formats tool completion output into clean visual lines."""
+        raw_str = str(output).strip()
+        clean_str = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw_str).strip()
+
+        # Command specific formatting
+        if tname == "run_command":
+            if "exit code: 0" in clean_str.lower():
+                content = clean_str
+                if "STDOUT:\n" in content:
+                    content = content.split("STDOUT:\n", 1)[1]
+                lines = [l for l in content.splitlines() if l.strip()]
+                if not lines:
+                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms, no output)[/dim]"
+                elif len(lines) == 1:
+                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:120]}[/dim]"
+                else:
+                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:90]} (+{len(lines)-1} more lines)[/dim]"
+            else:
+                lines = [l for l in clean_str.splitlines() if l.strip()]
+                err_summary = lines[0] if lines else "Non-zero exit"
+                return f" [yellow]! Command notice[/yellow] [dim]({time_ms:.1f}ms): {err_summary[:120]}[/dim]"
+
+        if tname == "enumerate_subdomains":
+            lines = [l for l in clean_str.splitlines() if l.strip()]
+            header = lines[0] if lines else "Complete"
+            return f" [green]✔ {header}[/green] [dim]({time_ms:.1f}ms)[/dim]"
+
+        lines = [l for l in clean_str.splitlines() if l.strip()]
+        if not lines:
+            return f" [green]✔ {tname} completed[/green] [dim]({time_ms:.1f}ms)[/dim]"
+        preview = lines[0][:120]
+        if len(lines) > 1:
+            preview += f" [dim](+{len(lines)-1} more lines)[/dim]"
+        return f" [green]✔ {tname} completed[/green] [dim]({time_ms:.1f}ms):[/dim] {preview}"
+
     def _on_agent_event(self, evt: AgentEvent):
-        """Displays real-time tool progress and thoughts."""
+        """Displays real-time tool progress and thoughts cleanly."""
         if evt.event_type == EventType.TOOL_CALL_START:
-            tname = evt.data.get("tool_name")
-            args = evt.data.get("arguments")
-            console.print(f" [cyan]⚡ Running tool:[/cyan] [bold]{tname}[/bold] [dim]{args}[/dim]")
+            tname = evt.data.get("tool_name", "")
+            args = evt.data.get("arguments", {})
+            if self._status_spinner:
+                self._status_spinner.update(f"[bold cyan]Loki is running {tname}...[/bold cyan]")
+            call_line = self._format_tool_call(tname, args)
+            console.print(f" {call_line}")
 
         elif evt.event_type == EventType.TOOL_CALL_END:
-            tname = evt.data.get("tool_name")
-            res = evt.data.get("output")
-            time_ms = evt.data.get("execution_time_ms", 0)
-            res_str = str(res)
-            if len(res_str) > 160:
-                res_str = res_str[:160] + "..."
-            console.print(f" [green]✔ Tool completed:[/green] [dim]{tname} ({time_ms:.1f}ms): {res_str}[/dim]")
+            tname = evt.data.get("tool_name", "")
+            res = evt.data.get("output", "")
+            time_ms = evt.data.get("execution_time_ms", 0.0)
+            if self._status_spinner:
+                self._status_spinner.update("[bold cyan]Loki is analyzing results...[/bold cyan]")
+            res_line = self._format_tool_result(tname, res, time_ms)
+            console.print(res_line)
+
+        elif evt.event_type == EventType.STEP_START:
+            step_num = evt.data.get("step_number", 1)
+            if self._status_spinner:
+                self._status_spinner.update(f"[bold cyan]Loki is thinking (step {step_num})...[/bold cyan]")
 
         elif evt.event_type == EventType.ERROR:
             err = evt.data.get("error")
@@ -224,11 +304,15 @@ class LokiConversationalCLI:
                 console.print("")
 
                 # Run agent with active status spinner
-                with console.status("[bold cyan]Loki is thinking...[/bold cyan]", spinner="dots"):
-                    result: RunResult = await self.agent.run(
-                        prompt=user_input,
-                        session_id=self.session_id,
-                    )
+                with console.status("[bold cyan]Loki is thinking...[/bold cyan]", spinner="dots") as status:
+                    self._status_spinner = status
+                    try:
+                        result: RunResult = await self.agent.run(
+                            prompt=user_input,
+                            session_id=self.session_id,
+                        )
+                    finally:
+                        self._status_spinner = None
 
                 self.total_tokens_used += result.total_usage.total_tokens
 

@@ -38,3 +38,17 @@ async def test_tool_execution():
     res_missing = await registry.execute_call(call_missing)
     assert res_missing.is_error
     assert "not found" in res_missing.output
+
+
+def test_python_exec_isolated_subprocess():
+    from loki.tools.builtins.python_tools import python_exec
+    output = python_exec("print('isolated_calc:', 12 * 12)")
+    assert "isolated_calc: 144" in output
+
+
+@pytest.mark.asyncio
+async def test_dns_lookup_and_scope():
+    from loki.tools.security_tools import dns_lookup, scope_mgr, ScopeConfig
+    scope_mgr.set_config(ScopeConfig(assessment_name="DNS Test", targets=["localhost", "127.0.0.1"]))
+    res = await dns_lookup("localhost")
+    assert "127.0.0.1" in res or "localhost" in res

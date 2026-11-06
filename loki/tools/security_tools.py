@@ -5,6 +5,9 @@ Binds together ScopeManager, PolicyEngine, ToolRegistry, and AssessmentStore.
 
 from typing import Any, Dict, List, Optional
 import httpx
+import socket
+import asyncio
+import re
 
 from loki.tools.base import tool
 from loki.security.scope_manager import ScopeManager, ScopeConfig
@@ -203,9 +206,94 @@ def generate_report(session_id: str) -> str:
     )
 
 
+@tool(name="enumerate_subdomains", description="Passively enumerate subdomains for an authorized target domain using Certificate Transparency and DNS reconnaissance.")
+async def enumerate_subdomains(domain: str) -> str:
+    """Enumerate subdomains passively via Certificate Transparency and verify DNS."""
+    domain = re.sub(r"^https?://", "", domain).split("/")[0].strip()
+    if ":" in domain:
+        domain = domain.split(":")[0]
+
+    is_allowed, reason = scope_mgr.is_in_scope(domain)
+    if not is_allowed:
+        return f"Scope Authorization Error: {reason}"
+
+    discovered_subs = set()
+
+    # 1. Query Certificate Transparency (crt.sh)
+    url = f"https://crt.sh/?q=%25.{domain}&output=json"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                for entry in data:
+                    name_val = entry.get("name_value", "")
+                    for sub in name_val.split("\n"):
+                        sub = sub.strip().lower()
+                        if sub.endswith(f".{domain}") and "*" not in sub:
+                            discovered_subs.add(sub)
+    except Exception:
+        pass
+
+    # 2. Add common standard prefixes as baseline
+    common_prefixes = ["www", "mail", "api", "dev", "staging", "blog", "vpn", "admin", "app", "portal", "ns1", "ns2"]
+    for p in common_prefixes:
+        discovered_subs.add(f"{p}.{domain}")
+
+    # 3. Resolve active subdomains
+    active_results = []
+    async def _resolve(fqdn: str):
+        try:
+            loop = asyncio.get_running_loop()
+            ip = await loop.run_in_executor(None, socket.gethostbyname, fqdn)
+            return (fqdn, ip)
+        except Exception:
+            return None
+
+    tasks = [_resolve(sub) for sub in sorted(discovered_subs)]
+    resolved = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for res in resolved:
+        if isinstance(res, tuple) and res is not None:
+            active_results.append(res)
+
+    if not active_results:
+        return f"No active subdomains resolved for target '{domain}'."
+
+    active_results.sort(key=lambda x: x[0])
+    lines = [f"Discovered {len(active_results)} active subdomains for '{domain}':\n"]
+    for fqdn, ip in active_results:
+        lines.append(f"  • {fqdn} ({ip})")
+
+    return "\n".join(lines)
+
+
+@tool(name="dns_lookup", description="Query DNS record resolution (A records, hostname to IP) for a target domain or host.")
+async def dns_lookup(domain: str) -> str:
+    """Resolve IP address for target domain."""
+    domain = re.sub(r"^https?://", "", domain).split("/")[0].strip()
+    is_allowed, reason = scope_mgr.is_in_scope(domain)
+    if not is_allowed:
+        return f"Scope Authorization Error: {reason}"
+
+    try:
+        loop = asyncio.get_running_loop()
+        ip_list = await loop.run_in_executor(None, socket.gethostbyname_ex, domain)
+        hostname, aliases, ips = ip_list
+        res = [f"DNS Resolution for {domain}:", f"Primary Hostname: {hostname}"]
+        if aliases:
+            res.append(f"Aliases: {', '.join(aliases)}")
+        res.append(f"IP Addresses: {', '.join(ips)}")
+        return "\n".join(res)
+    except Exception as e:
+        return f"DNS resolution failed for '{domain}': {str(e)}"
+
+
 ALL_SECURITY_TOOLS = [
     configure_scope,
     check_scope,
+    enumerate_subdomains,
+    dns_lookup,
     search_tools,
     get_cwe,
     get_owasp,

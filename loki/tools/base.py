@@ -78,6 +78,10 @@ class Tool:
             },
         }
 
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Allow Tool instances to be called directly like normal functions."""
+        return self.func(*args, **kwargs)
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute the tool with arguments and measure latency."""
         start_time = time.perf_counter()

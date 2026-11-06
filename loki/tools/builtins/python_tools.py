@@ -1,34 +1,43 @@
 """
-Built-in Python execution tool for running scripts and math.
+Built-in Python execution tool for running scripts, calculations, and analysis.
+Executes in an isolated subprocess to prevent CLI stdout collision and hangs.
 """
 
+import subprocess
 import sys
-import io
-import contextlib
+import re
 from loki.tools.base import tool
 
 
-@tool(name="python_exec", description="Execute arbitrary Python code and capture printed stdout and variable outputs.")
-def python_exec(code: str) -> str:
-    """Execute Python code in an isolated dictionary scope."""
-    stdout_capture = io.StringIO()
-    local_scope: dict = {}
-
+@tool(name="python_exec", description="Execute Python code in an isolated subprocess and capture stdout, stderr, and results.")
+def python_exec(code: str, timeout_seconds: int = 15) -> str:
+    """Execute Python code in a dedicated subprocess."""
     try:
-        with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stdout_capture):
-            exec(code, {"__builtins__": __builtins__}, local_scope)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=float(timeout_seconds),
+        )
+        stdout = proc.stdout.strip()
+        stderr = proc.stderr.strip()
 
-        output = stdout_capture.getvalue().strip()
-        result_val = local_scope.get("result")
-        
-        response_parts = []
-        if output:
-            response_parts.append(f"Output:\n{output}")
-        if result_val is not None:
-            response_parts.append(f"Result variable: {result_val}")
+        # Strip any stray terminal escape codes
+        stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", stdout)
+        stderr = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", stderr)
 
-        if not response_parts:
+        parts = []
+        if stdout:
+            parts.append(f"Output:\n{stdout}")
+        if stderr:
+            parts.append(f"Errors:\n{stderr}")
+        if proc.returncode != 0 and not stderr:
+            parts.append(f"Process exited with code: {proc.returncode}")
+
+        if not parts:
             return "Code executed successfully with no output."
-        return "\n".join(response_parts)
+        return "\n".join(parts)
+    except subprocess.TimeoutExpired:
+        return f"Python execution timed out after {timeout_seconds} seconds."
     except Exception as e:
         return f"Python execution error: {type(e).__name__}: {str(e)}"
