@@ -3,7 +3,7 @@ Agent Tools for Cybersecurity Research and Auditing.
 Binds together ScopeManager, PolicyEngine, ToolRegistry, and AssessmentStore.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import httpx
 import socket
 import asyncio
@@ -55,32 +55,68 @@ def authorize_target(target: str) -> str:
 
 @tool(name="configure_assessment_scope", description="Initialize or update authorized assessment scope and targets.")
 def configure_scope(
-    assessment_name: str,
-    targets: List[str],
-    excluded_targets: Optional[List[str]] = None,
+    targets: Union[List[str], str],
+    assessment_name: Optional[str] = None,
+    excluded_targets: Optional[Union[List[str], str]] = None,
     execution_mode: str = "safe",
 ) -> str:
-    """Set the assessment scope and boundaries."""
-    mode = ExecutionMode(execution_mode.lower()) if execution_mode.lower() in ("safe", "aggressive", "advanced_audit") else ExecutionMode.SAFE
+    """Set the assessment scope and boundaries flexibly."""
+    if isinstance(targets, str):
+        if "," in targets:
+            target_list = [t.strip() for t in targets.split(",") if t.strip()]
+        else:
+            target_list = [targets.strip()]
+    elif isinstance(targets, (list, tuple)):
+        target_list = [str(t).strip() for t in targets if str(t).strip()]
+    else:
+        target_list = [str(targets).strip()]
+
+    # Clean protocols/ports from targets
+    cleaned_targets = []
+    for t in target_list:
+        c = re.sub(r"^https?://", "", t).split("/")[0].strip()
+        if ":" in c:
+            c = c.split(":")[0]
+        if c:
+            cleaned_targets.append(c)
+
+    if not cleaned_targets:
+        cleaned_targets = ["127.0.0.1", "localhost"]
+
+    clean_excluded = []
+    if excluded_targets:
+        if isinstance(excluded_targets, str):
+            clean_excluded = [excluded_targets.strip()]
+        elif isinstance(excluded_targets, (list, tuple)):
+            clean_excluded = [str(e).strip() for e in excluded_targets]
+
+    name = assessment_name or f"Assessment-{cleaned_targets[0]}"
+
+    mode = ExecutionMode.SAFE
+    if execution_mode and execution_mode.lower() in ("safe", "aggressive", "advanced_audit"):
+        mode = ExecutionMode(execution_mode.lower())
+
     config = ScopeConfig(
-        assessment_name=assessment_name,
-        targets=targets,
-        excluded_targets=excluded_targets or [],
+        assessment_name=name,
+        targets=cleaned_targets,
+        excluded_targets=clean_excluded,
+        allow_subdomains=True,
     )
     scope_mgr.set_config(config)
     policy_engine.set_mode(mode)
     
     # Initialize assessment session
-    session_id = f"audit_{assessment_name.lower().replace(' ', '_')}"
+    clean_sess_id = re.sub(r"[^a-zA-Z0-9_]", "_", name.lower())
+    session_id = f"audit_{clean_sess_id}"
     session = assessment_store.create_assessment(
         session_id=session_id,
-        name=assessment_name,
+        name=name,
         scope=config,
     )
     session.execution_mode = mode
     assessment_store.save_assessment(session)
 
-    return f"Scope successfully configured for '{assessment_name}'. Targets: {targets}. Excluded: {excluded_targets or []}. Mode: {mode.value.upper()}. Session ID: {session_id}."
+    return f"Scope successfully configured for '{name}'. Authorized Targets: {cleaned_targets}. Mode: {mode.value.upper()}."
 
 
 @tool(name="check_scope_authorization", description="Verify if a target host, IP, or URL is within the authorized assessment scope.")

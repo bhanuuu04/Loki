@@ -52,3 +52,17 @@ async def test_dns_lookup_and_scope():
     scope_mgr.set_config(ScopeConfig(assessment_name="DNS Test", targets=["localhost", "127.0.0.1"]))
     res = await dns_lookup("localhost")
     assert "127.0.0.1" in res or "localhost" in res
+
+
+def test_configure_scope_flexible_inputs():
+    from loki.tools.security_tools import configure_scope, scope_mgr
+
+    # Single string target without assessment_name
+    res1 = configure_scope(targets="schoolknot.com")
+    assert "Authorized Targets: ['schoolknot.com']" in res1
+    assert "schoolknot.com" in scope_mgr.config.targets
+
+    # Comma-separated string with URLs
+    res2 = configure_scope(targets="http://api.schoolknot.com:8080/path, https://blog.schoolknot.com")
+    assert "api.schoolknot.com" in scope_mgr.config.targets
+    assert "blog.schoolknot.com" in scope_mgr.config.targets

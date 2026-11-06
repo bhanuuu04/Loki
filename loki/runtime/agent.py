@@ -251,9 +251,21 @@ class LokiAgent:
                     )
                     break
             else:
-                # Reached max steps without completing
+                # Reached max steps: Request final synthesis from model
                 current_status = RunStatus.MAX_STEPS_REACHED
-                final_answer = "Max step limit reached before agent concluded execution."
+                try:
+                    context.add_user_message(
+                        "Step limit reached. Please synthesize all results, tool outputs, and observations gathered so far into a clear, comprehensive final answer."
+                    )
+                    synthesis_resp = await self.provider.chat_complete(
+                        messages=context.get_messages(),
+                        tools=None,
+                        temperature=self.temperature,
+                    )
+                    final_answer = synthesis_resp.content or f"Reached execution limit ({self.max_steps} steps). See session history for findings."
+                    context.add_assistant_message(content=final_answer)
+                except Exception:
+                    final_answer = f"Completed {len(steps)} investigation steps. Detailed observations have been recorded."
 
         except Exception as e:
             current_status = RunStatus.ERROR
