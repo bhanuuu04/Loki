@@ -6,3 +6,6 @@ dist/
 build/
 .pytest_cache/
 .env
+assessments/*.json
+reports/*
+logs/*.jsonl

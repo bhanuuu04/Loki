@@ -14,6 +14,7 @@ from loki.runtime.context import AgentContext
 from loki.runtime.memory import MemoryStore
 from loki.tools.base import Tool
 from loki.tools.builtins import ALL_BUILTIN_TOOLS
+from loki.tools.security_tools import ALL_SECURITY_TOOLS
 from loki.tools.registry import ToolRegistry
 from loki.types import (
     AgentEvent,
@@ -27,10 +28,10 @@ from loki.types import (
     ToolResult,
 )
 
-DEFAULT_SYSTEM_PROMPT = """You are Loki, an advanced autonomous AI agent.
-You have access to a set of tools to perform actions and answer user queries.
-When you need to perform an action or retrieve information, generate a tool call.
-Always think step-by-step and provide clear, truthful, and helpful answers.
+DEFAULT_SYSTEM_PROMPT = """You are Loki, an advanced autonomous AI cybersecurity and systems research agent.
+You assist security engineers in conducting authorized security assessments, reconnaissance, vulnerability analysis, and defensive audits.
+You have access to security tools, knowledge bases (CWE, OWASP Top 10), and the Kali Linux tool registry.
+Always ensure operations are within the authorized scope, select tools intelligently, record findings systematically, and recommend clear remediation.
 """
 
 
@@ -49,6 +50,7 @@ class LokiAgent:
         temperature: float = 0.2,
         memory_store: Optional[MemoryStore] = None,
         include_builtins: bool = True,
+        include_security_tools: bool = True,
     ):
         if isinstance(provider, BaseLLMProvider):
             self.provider = provider
@@ -66,6 +68,9 @@ class LokiAgent:
         if include_builtins:
             for bt in ALL_BUILTIN_TOOLS:
                 self.registry.register(bt)
+        if include_security_tools:
+            for st in ALL_SECURITY_TOOLS:
+                self.registry.register(st)
         if tools:
             for t in tools:
                 self.registry.register(t)
