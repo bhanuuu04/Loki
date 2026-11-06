@@ -3,6 +3,7 @@ from loki.providers.mock_provider import MockProvider
 from loki.providers.openai_provider import OpenAICompatibleProvider
 from loki.providers.gemini_provider import GeminiProvider
 from loki.providers.anthropic_provider import AnthropicProvider
+from loki.providers.nvidia_provider import NvidiaNimProvider
 from loki.providers.factory import get_provider
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "OpenAICompatibleProvider",
     "GeminiProvider",
     "AnthropicProvider",
+    "NvidiaNimProvider",
     "get_provider",
 ]

@@ -45,8 +45,16 @@ class SecurityToolEntry(BaseModel):
     resolved_path: Optional[str] = None
 
     def refresh_installed_status(self) -> bool:
-        """Check if binary is executable and discoverable on PATH."""
-        path = shutil.which(self.binary_name)
+        """Check if binary is executable and discoverable using platform adapter."""
+        from loki.platform.adapters.factory import get_platform_adapter
+        adapter = get_platform_adapter()
+        path = adapter.find_tool_binary(self.binary_name)
         self.is_installed = path is not None
         self.resolved_path = path
         return self.is_installed
+
+    def get_platform_install_hint(self) -> str:
+        """Returns OS-specific installation recommendation."""
+        from loki.platform.adapters.factory import get_platform_adapter
+        adapter = get_platform_adapter()
+        return adapter.get_install_instruction(self.name, self.binary_name)

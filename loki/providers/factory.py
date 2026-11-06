@@ -9,6 +9,7 @@ from loki.providers.mock_provider import MockProvider
 from loki.providers.openai_provider import OpenAICompatibleProvider
 from loki.providers.gemini_provider import GeminiProvider
 from loki.providers.anthropic_provider import AnthropicProvider
+from loki.providers.nvidia_provider import NvidiaNimProvider
 
 
 def get_provider(
@@ -37,6 +38,14 @@ def get_provider(
 
     if provider_name == "mock":
         return MockProvider(model=model_name or "mock-agent-v1", **kwargs)
+
+    elif provider_name in ("nvidia", "nvidia_nim", "nim"):
+        return NvidiaNimProvider(
+            model=model_name or settings.nvidia_nim_model or "meta/llama-3.3-70b-instruct",
+            api_key=api_key or settings.nvidia_nim_api_key,
+            base_url=settings.nvidia_nim_base_url,
+            **kwargs,
+        )
 
     elif provider_name in ("openai", "gpt"):
         return OpenAICompatibleProvider(
