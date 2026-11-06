@@ -19,6 +19,8 @@ from loki.eval.dataset import BenchmarkSuite
 from loki.eval.runner import EvalRunner
 from loki.types import AgentEvent, EventType, RunResult
 from loki.cli.doctor import LokiDoctor
+from loki.cli.setup import run_setup_wizard
+from loki.cli.interface import LokiConversationalCLI
 from loki.providers.factory import get_provider
 from loki.providers.compatibility import ModelCompatibilityTester
 
@@ -141,6 +143,9 @@ def cli_entrypoint():
     parser.add_argument("-v", "--version", action="version", version=f"Loki {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
+    # Command: setup
+    subparsers.add_parser("setup", help="Run interactive first-time setup wizard")
+
     # Command: doctor
     subparsers.add_parser("doctor", help="Run complete system health and platform diagnostics")
 
@@ -191,7 +196,10 @@ def cli_entrypoint():
 
     args = parser.parse_args()
 
-    if args.command == "doctor":
+    if args.command == "setup":
+        asyncio.run(run_setup_wizard())
+
+    elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())
         LokiDoctor.display_report(items)
 
@@ -215,7 +223,8 @@ def cli_entrypoint():
         asyncio.run(_run_prompt(args.prompt, args.provider, args.max_steps))
 
     elif args.command == "chat":
-        asyncio.run(_chat_loop(args.provider, args.max_steps))
+        cli = LokiConversationalCLI(provider=args.provider, max_steps=args.max_steps)
+        asyncio.run(cli.start())
 
     elif args.command == "eval":
         asyncio.run(_run_eval(args.suite, args.provider))
@@ -236,7 +245,9 @@ def cli_entrypoint():
         console.print("")
 
     else:
-        parser.print_help()
+        # Default behavior when running `loki` without arguments: Launch Conversational Interface
+        cli = LokiConversationalCLI()
+        asyncio.run(cli.start())
 
 
 if __name__ == "__main__":

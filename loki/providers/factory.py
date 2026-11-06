@@ -34,6 +34,10 @@ def get_provider(
         provider_name = descriptor.lower()
         model_name = settings.default_model
 
+    # Support model passed in kwargs
+    if "model" in kwargs:
+        model_name = kwargs.pop("model")
+
     provider_name = provider_name.lower().strip()
 
     if provider_name == "mock":
