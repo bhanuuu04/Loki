@@ -20,6 +20,7 @@ from loki.config import settings
 from loki.runtime.agent import LokiAgent
 from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
+from loki.tools.security_tools import scope_mgr
 from loki.providers.factory import get_provider
 from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file
@@ -52,12 +53,10 @@ class LokiConversationalCLI:
         self.turn_count = 0
         self._status_spinner = None
 
-        self.scope_manager = ScopeManager(
-            ScopeConfig(
-                assessment_name="Loki Interactive Assessment",
-                targets=["127.0.0.1", "localhost"],
-            )
-        )
+        self.scope_manager = scope_mgr
+        if "127.0.0.1" not in self.scope_manager.config.targets:
+            self.scope_manager.config.targets.extend(["127.0.0.1", "localhost"])
+            self.scope_manager._init_rules()
 
         self.agent = LokiAgent(
             provider=get_provider(self.provider_name, model=self.model_name),
@@ -78,6 +77,9 @@ class LokiConversationalCLI:
         elif tname == "enumerate_subdomains":
             domain = args.get("domain", "")
             return f"[bold cyan]⚡ Subdomain Reconnaissance:[/bold cyan] [bold white]{domain}[/bold white]"
+        elif tname == "authorize_target":
+            target = args.get("target", "")
+            return f"[bold cyan]⚡ Authorizing Target:[/bold cyan] [bold white]{target}[/bold white]"
         elif tname == "dns_lookup":
             domain = args.get("domain", "")
             return f"[bold cyan]⚡ DNS Query:[/bold cyan] [bold white]{domain}[/bold white]"

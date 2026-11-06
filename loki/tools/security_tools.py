@@ -26,11 +26,31 @@ from loki.assessment.models import (
 )
 
 # Global shared context singletons
-scope_mgr = ScopeManager()
+scope_mgr = ScopeManager(
+    ScopeConfig(
+        assessment_name="Loki Assessment Session",
+        targets=["127.0.0.1", "localhost"],
+        allow_subdomains=True,
+    )
+)
 policy_engine = PolicyEngine(scope_manager=scope_mgr)
 tool_catalog = SecurityToolCatalog()
 process_executor = SecureProcessExecutor()
 assessment_store = AssessmentStore()
+
+
+@tool(name="authorize_target", description="Authorize a target host, domain, URL, or IP address for assessment when the user specifies it in chat.")
+def authorize_target(target: str) -> str:
+    """Authorize a target domain or IP."""
+    cleaned = re.sub(r"^https?://", "", target.strip()).split("/")[0].strip()
+    if ":" in cleaned:
+        cleaned = cleaned.split(":")[0]
+    if not cleaned:
+        return "Error: Target identifier cannot be empty."
+    if cleaned not in scope_mgr.config.targets:
+        scope_mgr.config.targets.append(cleaned)
+        scope_mgr._init_rules()
+    return f"Target '{cleaned}' has been authorized under assessment scope. You may now perform reconnaissance or security audits on it."
 
 
 @tool(name="configure_assessment_scope", description="Initialize or update authorized assessment scope and targets.")
@@ -291,6 +311,7 @@ async def dns_lookup(domain: str) -> str:
 
 ALL_SECURITY_TOOLS = [
     configure_scope,
+    authorize_target,
     check_scope,
     enumerate_subdomains,
     dns_lookup,
