@@ -173,16 +173,36 @@ Loki dynamically detects the host operating system (`PlatformDetector`) and sele
 
 | Command | Description |
 | :--- | :--- |
+| `loki` | Launch interactive conversational chat session (Hermes style) |
+| `loki setup` / `loki onboard` | Run interactive onboarding wizard with provider and model setup |
+| `loki onboard --reset` | Reset configuration to defaults and re-run onboarding |
+| `loki model` | Interactively select and switch AI models using arrow keys |
 | `loki doctor` | Run full system health and platform diagnostics |
 | `loki version` | Print current Loki version |
 | `loki config` | View active configuration and provider parameters |
 | `loki start` / `loki serve` | Start the FastAPI API & Web UI on `http://127.0.0.1:8000` |
 | `loki run "<prompt>"` | Run an agent prompt with real-time step streaming |
-| `loki chat` | Launch interactive terminal REPL |
 | `loki eval <suite.json>` | Execute benchmark evaluation suites |
 | `loki models list` | Query and list available models from active provider |
 | `loki models test` | Run capability probe (connectivity, streaming, tools) |
 | `loki tools` | List all registered tools in the runtime |
+
+---
+
+## Slash Commands (Inside Interactive Chat)
+
+| Command | Description |
+| :--- | :--- |
+| `/help` | Display list of available chat commands |
+| `/model [id]` | Select model with interactive arrow-key menu, or specify model ID |
+| `/provider <name>` | Switch provider (`nvidia`, `mock`, `gemini`, `openai`, `ollama`) |
+| `/mode <name>` | Switch execution mode (`safe`, `aggressive`, `advanced_audit`) |
+| `/scope [target]` | View authorized scope or add a target (`/scope add 192.168.1.1`) |
+| `/tools` | Display list of available security and system tools |
+| `/status` | View session token usage, turn count, and health stats |
+| `/history` | View conversation history in the current session |
+| `/clear` | Clear terminal screen |
+| `/exit` / `/quit` | Exit conversational session |
 
 ---
 
@@ -199,4 +219,4 @@ A matrix test workflow is configured in `.github/workflows/ci.yml` that automati
 ```bash
 python -m pytest -v
 ```
-All 20 test cases pass natively.
+All unit and integration test cases pass natively.

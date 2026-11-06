@@ -25,3 +25,19 @@ async def test_agent_step_limit():
     result = await agent.run("Please calculate 25 * 4 using the calculator tool.")
     # In step 1, mock agent invokes calculator tool. Since max_steps=1, it should stop gracefully
     assert result.status in (RunStatus.SUCCESS, RunStatus.MAX_STEPS_REACHED)
+
+
+@pytest.mark.asyncio
+async def test_agent_error_handling():
+    class FailingProvider:
+        model = "failing-model"
+        async def chat_complete(self, *args, **kwargs):
+            raise ConnectionError("Simulated network outage")
+
+    agent = LokiAgent(provider=FailingProvider())
+    result = await agent.run("Hello world")
+
+    assert result.status == RunStatus.ERROR
+    assert "Simulated network outage" in result.error_message
+    assert result.final_response != ""
+    assert "Simulated network outage" in result.final_response

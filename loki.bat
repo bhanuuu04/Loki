@@ -1,2 +1,6 @@
 @echo off
-python -m loki.cli.main %*
+if exist .venv\Scripts\python.exe (
+    .venv\Scripts\python.exe -m loki %*
+) else (
+    python -m loki %*
+)

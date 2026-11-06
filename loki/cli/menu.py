@@ -17,25 +17,28 @@ console = Console(force_terminal=True)
 
 def _get_key_windows() -> str:
     import msvcrt
-    ch = msvcrt.getch()
-    if ch in (b"\x00", b"\xe0"):
-        ch2 = msvcrt.getch()
-        if ch2 == b"H":
+    try:
+        ch = msvcrt.getch()
+        if ch in (b"\x00", b"\xe0"):
+            ch2 = msvcrt.getch()
+            if ch2 == b"H":
+                return "UP"
+            elif ch2 == b"P":
+                return "DOWN"
+            elif ch2 == b"K":
+                return "LEFT"
+            elif ch2 == b"M":
+                return "RIGHT"
+        elif ch in (b"\r", b"\n"):
+            return "ENTER"
+        elif ch in (b"\x03", b"\x1b"):  # Ctrl+C or ESC
+            return "EXIT"
+        elif ch in (b"k", b"w", b"K", b"W"):
             return "UP"
-        elif ch2 == b"P":
+        elif ch in (b"j", b"s", b"J", b"S"):
             return "DOWN"
-        elif ch2 == b"K":
-            return "LEFT"
-        elif ch2 == b"M":
-            return "RIGHT"
-    elif ch in (b"\r", b"\n"):
-        return "ENTER"
-    elif ch in (b"\x03", b"\x1b"):  # Ctrl+C or ESC
-        return "EXIT"
-    elif ch == b"k":
-        return "UP"
-    elif ch == b"j":
-        return "DOWN"
+    except Exception:
+        pass
     return ""
 
 
@@ -45,7 +48,12 @@ def _get_key_unix() -> str:
     import select
 
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    try:
+        old_settings = termios.tcgetattr(fd)
+    except Exception:
+        # Not a terminal supporting termios
+        return "ENTER"
+
     try:
         tty.setraw(fd)
         ch = sys.stdin.read(1)
@@ -54,7 +62,7 @@ def _get_key_unix() -> str:
             r, _, _ = select.select([sys.stdin], [], [], 0.05)
             if r:
                 ch2 = sys.stdin.read(1)
-                if ch2 == "[":
+                if ch2 in ("[", "O"):
                     r2, _, _ = select.select([sys.stdin], [], [], 0.05)
                     if r2:
                         ch3 = sys.stdin.read(1)
@@ -71,13 +79,16 @@ def _get_key_unix() -> str:
             return "ENTER"
         elif ch in ("\x03", "\x04"):  # Ctrl+C / Ctrl+D
             return "EXIT"
-        elif ch == "k":
+        elif ch in ("k", "w", "K", "W"):
             return "UP"
-        elif ch == "j":
+        elif ch in ("j", "s", "J", "S"):
             return "DOWN"
         return ""
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except Exception:
+            pass
 
 
 def get_key() -> str:
@@ -149,6 +160,10 @@ def select_from_menu(
         raise ValueError("Menu options cannot be empty.")
 
     current_idx = max(0, min(default_index, len(options) - 1))
+
+    # Guard against non-interactive stdin (CI, pipes, redirects)
+    if not hasattr(sys.stdin, "isatty") or not sys.stdin.isatty():
+        return current_idx
 
     # Use Rich Live context manager to control the terminal buffer cleanly
     with Live(

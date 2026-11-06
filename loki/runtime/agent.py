@@ -52,10 +52,10 @@ class LokiAgent:
         include_builtins: bool = True,
         include_security_tools: bool = True,
     ):
-        if isinstance(provider, BaseLLMProvider):
-            self.provider = provider
-        elif isinstance(provider, str):
+        if isinstance(provider, str):
             self.provider = get_provider(provider)
+        elif provider is not None:
+            self.provider = provider
         else:
             self.provider = get_provider(settings.default_provider)
 
@@ -148,6 +148,8 @@ class LokiAgent:
                 except Exception as e:
                     error_msg = f"LLM error during step {step_idx}: {str(e)}"
                     current_status = RunStatus.ERROR
+                    if not final_answer:
+                        final_answer = error_msg
                     await self._emit(EventType.ERROR, run_id, {"error": error_msg})
                     break
 
@@ -250,6 +252,8 @@ class LokiAgent:
         except Exception as e:
             current_status = RunStatus.ERROR
             error_msg = f"Agent harness execution exception: {str(e)}"
+            if not final_answer:
+                final_answer = error_msg
             await self._emit(EventType.ERROR, run_id, {"error": error_msg})
 
         # Save session memory if requested

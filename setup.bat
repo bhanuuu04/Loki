@@ -13,5 +13,5 @@ if %errorlevel% neq 0 (
 )
 
 echo [2/2] Launching interactive onboarding wizard...
-python -m loki.cli.main onboard %*
+python -m loki onboard %*
 endlocal

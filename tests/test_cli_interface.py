@@ -20,6 +20,17 @@ def test_cli_slash_commands():
     assert cli.handle_command("/model custom-nim-model") is True
     assert cli.model_name == "custom-nim-model"
 
+    # Test /scope
+    assert cli.handle_command("/scope") is True
+    assert cli.handle_command("/scope 192.168.1.100") is True
+    assert "192.168.1.100" in cli.scope_manager.config.targets
+
+    # Test /tools
+    assert cli.handle_command("/tools") is True
+
+    # Test /history
+    assert cli.handle_command("/history") is True
+
     # Test /exit
     assert cli.handle_command("/exit") is False
     assert cli.handle_command("/quit") is False

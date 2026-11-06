@@ -16,11 +16,12 @@ from rich import box
 from loki import __version__
 from loki.config import settings
 from loki.runtime.agent import LokiAgent
-from loki.security.scope_manager import ScopeManager
+from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
 from loki.providers.factory import get_provider
 from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file
+from loki.types import AgentEvent, EventType, RunResult, RunStatus
 
 console = Console(force_terminal=True)
 
@@ -47,6 +48,13 @@ class LokiConversationalCLI:
         self.session_id = f"cli_{int(time.time())}"
         self.total_tokens_used = 0
         self.turn_count = 0
+
+        self.scope_manager = ScopeManager(
+            ScopeConfig(
+                assessment_name="Loki Interactive Assessment",
+                targets=["127.0.0.1", "localhost"],
+            )
+        )
 
         self.agent = LokiAgent(
             provider=get_provider(self.provider_name, model=self.model_name),
@@ -143,6 +151,21 @@ class LokiConversationalCLI:
             else:
                 console.print(f"Current mode: [yellow]{self.mode.value}[/yellow]. Options: safe, aggressive, advanced_audit")
 
+        elif sub == "/scope":
+            if not arg:
+                targets = self.scope_manager.config.targets
+                console.print(f"\n[bold cyan]Authorized Target Scope ({len(targets)}):[/bold cyan]")
+                for t in targets:
+                    console.print(f" • [green]{t}[/green]")
+                console.print("[dim]Use /scope add <host|ip|cidr> to authorize new targets.[/dim]\n")
+            else:
+                target_to_add = arg.replace("add", "").strip() if arg.startswith("add ") else arg.strip()
+                if target_to_add:
+                    if target_to_add not in self.scope_manager.config.targets:
+                        self.scope_manager.config.targets.append(target_to_add)
+                        self.scope_manager._init_rules()
+                    console.print(f"[bold green]✔ Added to authorized scope:[/bold green] [bold cyan]{target_to_add}[/bold cyan]")
+
         elif sub == "/tools":
             tools = self.agent.registry.list_tools()
             console.print(f"\n[bold cyan]Registered Tools ({len(tools)}):[/bold cyan]")
@@ -169,7 +192,9 @@ class LokiConversationalCLI:
                 if m.role.value == "system":
                     continue
                 role_color = "blue" if m.role.value == "user" else "green"
-                console.print(f"[[{role_color}]{m.role.value.upper()}[/{role_color}]]: {m.content[:100]}...")
+                txt = m.content or ""
+                preview = txt[:120] + "..." if len(txt) > 120 else txt
+                console.print(f"[[{role_color}]{m.role.value.upper()}[/{role_color}]]: {preview}")
             console.print("")
 
         else:
@@ -198,17 +223,35 @@ class LokiConversationalCLI:
                 self.turn_count += 1
                 console.print("")
 
-                # Run agent with session memory persistence
-                result: RunResult = await self.agent.run(
-                    prompt=user_input,
-                    session_id=self.session_id,
-                )
+                # Run agent with active status spinner
+                with console.status("[bold cyan]Loki is thinking...[/bold cyan]", spinner="dots"):
+                    result: RunResult = await self.agent.run(
+                        prompt=user_input,
+                        session_id=self.session_id,
+                    )
 
                 self.total_tokens_used += result.total_usage.total_tokens
 
-                # Render markdown response
-                if result.final_response:
+                # Display error panel if run failed
+                if result.status == RunStatus.ERROR or result.error_message:
+                    err_text = result.error_message or result.final_response or "Unknown runtime error."
+                    console.print(
+                        Panel(
+                            f"[bold red]Execution Error:[/bold red] {err_text}\n\n"
+                            f"[yellow]Troubleshooting Tips:[/yellow]\n"
+                            f" • Check your API key or reconfigure: [bold cyan]loki onboard[/bold cyan]\n"
+                            f" • Switch model: [bold cyan]/model[/bold cyan] or [bold cyan]loki model[/bold cyan]\n"
+                            f" • Use offline mock provider: [bold cyan]/provider mock[/bold cyan]\n"
+                            f" • Run environment diagnostics: [bold cyan]loki doctor[/bold cyan]",
+                            title="[bold red]Agent Encountered an Issue[/bold red]",
+                            border_style="red",
+                        )
+                    )
+                elif result.final_response:
                     console.print(Markdown(result.final_response))
+                else:
+                    console.print("[dim](No response content returned)[/dim]")
+
                 console.print("")
 
             except (KeyboardInterrupt, EOFError):

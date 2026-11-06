@@ -4,7 +4,7 @@
 
 # Prefer local virtual environment if present
 if [ -f ".venv/bin/python" ]; then
-    exec .venv/bin/python -m loki.cli.main "$@"
+    exec .venv/bin/python -m loki "$@"
 fi
 
 PYTHON_CMD="python3"
@@ -12,4 +12,4 @@ if ! command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python"
 fi
 
-exec $PYTHON_CMD -m loki.cli.main "$@"
+exec $PYTHON_CMD -m loki "$@"
