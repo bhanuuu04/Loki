@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loki — Full-Stack Agent Harness Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .glass-card { background: rgba(22, 27, 34, 0.85); backdrop-filter: blur(12px); border: 1px solid #30363d; border-radius: 0.75rem; }
+    .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="border-b border-[#30363d] bg-[#161b22]/90 backdrop-blur px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xl shadow-lg">
+        L
+      </div>
+      <div>
+        <h1 class="font-bold text-lg text-white tracking-wide">LOKI <span class="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 font-mono ml-2">v0.1.0</span></h1>
+        <p class="text-xs text-gray-400">Agent Execution Runtime &amp; Benchmark Harness</p>
+      </div>
+    </div>
+    <!-- Tabs -->
+    <div class="flex space-x-2 bg-[#0d1117] p-1 rounded-lg border border-[#30363d]">
+      <button id="tab-agent" onclick="switchTab('agent')" class="px-4 py-1.5 rounded-md text-sm font-medium transition bg-indigo-600 text-white shadow">
+        <i class="fa-solid fa-robot mr-1.5"></i> Agent Studio
+      </button>
+      <button id="tab-eval" onclick="switchTab('eval')" class="px-4 py-1.5 rounded-md text-sm font-medium transition text-gray-400 hover:text-white">
+        <i class="fa-solid fa-chart-line mr-1.5"></i> Eval Suite
+      </button>
+      <button id="tab-tools" onclick="switchTab('tools')" class="px-4 py-1.5 rounded-md text-sm font-medium transition text-gray-400 hover:text-white">
+        <i class="fa-solid fa-screwdriver-wrench mr-1.5"></i> Tool Registry
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full">
+
+    <!-- TAB 1: AGENT RUNTIME STUDIO -->
+    <div id="view-agent" class="space-y-6">
+      <!-- Input Panel -->
+      <div class="glass-card p-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div class="flex items-center space-x-3">
+            <label class="text-sm font-medium text-gray-300">Provider & Model:</label>
+            <select id="model-select" class="bg-[#0d1117] border border-[#30363d] rounded-md px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-indigo-500">
+              <option value="mock">Deterministic Mock Agent (Zero-API Offline)</option>
+              <option value="gemini/gemini-2.5-flash">Google Gemini 2.5 Flash</option>
+              <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+              <option value="ollama/llama3.1">Local Ollama (llama3.1)</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-3 text-sm text-gray-400">
+            <span>Max Steps: <b>10</b></span>
+            <span>•</span>
+            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 mr-2 pulse-dot"></span>Ready</span>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <textarea id="prompt-input" rows="2" placeholder="Ask Loki to solve a problem, perform math, run python, read files, or execute a task..."
+            class="flex-1 bg-[#0d1117] border border-[#30363d] rounded-lg p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 font-sans"></textarea>
+          <button id="btn-run" onclick="runAgent()" class="px-6 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg text-sm flex items-center justify-center transition shadow-lg gap-2">
+            <i class="fa-solid fa-play"></i> Run Agent
+          </button>
+        </div>
+
+        <!-- Quick Prompts -->
+        <div class="flex flex-wrap gap-2 mt-3">
+          <span class="text-xs text-gray-500 py-1">Quick Try:</span>
+          <button onclick="setPrompt('Calculate (150 * 4) + (250 / 5) using the calculator tool')" class="text-xs bg-[#21262d] hover:bg-[#30363d] text-gray-300 px-2.5 py-1 rounded border border-[#30363d]">🧮 Math Tool</button>
+          <button onclick="setPrompt('Execute python code to calculate the sum of squares of numbers from 1 to 10')" class="text-xs bg-[#21262d] hover:bg-[#30363d] text-gray-300 px-2.5 py-1 rounded border border-[#30363d]">🐍 Python Execution</button>
+          <button onclick="setPrompt('Read the sample.txt file and tell me what is inside')" class="text-xs bg-[#21262d] hover:bg-[#30363d] text-gray-300 px-2.5 py-1 rounded border border-[#30363d]">📁 File Inspect</button>
+        </div>
+      </div>
+
+      <!-- Live Execution Telemetry & Step Stream -->
+      <div class="glass-card p-5">
+        <div class="flex items-center justify-between pb-3 border-b border-[#30363d]">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+            <i class="fa-solid fa-terminal text-indigo-400"></i> Execution Steps & Telemetry
+          </h2>
+          <div id="run-telemetry" class="text-xs text-gray-400 flex gap-4">
+            <span>Tokens: <b id="stat-tokens" class="text-white">0</b></span>
+            <span>Latency: <b id="stat-latency" class="text-white">0ms</b></span>
+            <span>Status: <b id="stat-status" class="text-gray-300">Idle</b></span>
+          </div>
+        </div>
+
+        <!-- Step Stream Timeline Container -->
+        <div id="step-timeline" class="mt-4 space-y-4 min-h-[220px]">
+          <div id="empty-state" class="text-center py-12 text-gray-500">
+            <i class="fa-solid fa-microchip text-3xl mb-3 text-gray-600"></i>
+            <p class="text-sm">Enter a prompt above and click "Run Agent" to see the live step loop.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: EVAL SUITE -->
+    <div id="view-eval" class="hidden space-y-6">
+      <div class="glass-card p-5 flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+            <i class="fa-solid fa-vial text-purple-400"></i> Evaluation &amp; Benchmark Suites
+          </h2>
+          <p class="text-xs text-gray-400 mt-1">Test agent accuracy, tool selection, reasoning, and token economy against defined benchmarks.</p>
+        </div>
+        <button onclick="runEvalBenchmark()" id="btn-eval" class="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg text-sm flex items-center gap-2 transition shadow-lg">
+          <i class="fa-solid fa-play"></i> Run Benchmark Suite
+        </button>
+      </div>
+
+      <!-- Scorecard Summary -->
+      <div id="eval-summary" class="hidden grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="glass-card p-4 text-center">
+          <p class="text-xs text-gray-400 uppercase font-semibold">Pass Rate</p>
+          <p id="eval-pass-rate" class="text-3xl font-bold text-emerald-400 mt-1">100%</p>
+        </div>
+        <div class="glass-card p-4 text-center">
+          <p class="text-xs text-gray-400 uppercase font-semibold">Passed / Total</p>
+          <p id="eval-ratio" class="text-3xl font-bold text-white mt-1">4 / 4</p>
+        </div>
+        <div class="glass-card p-4 text-center">
+          <p class="text-xs text-gray-400 uppercase font-semibold">Avg Latency</p>
+          <p id="eval-latency" class="text-3xl font-bold text-indigo-400 mt-1">24ms</p>
+        </div>
+        <div class="glass-card p-4 text-center">
+          <p class="text-xs text-gray-400 uppercase font-semibold">Total Tokens</p>
+          <p id="eval-tokens" class="text-3xl font-bold text-cyan-400 mt-1">540</p>
+        </div>
+      </div>
+
+      <!-- Eval Cases Table -->
+      <div class="glass-card overflow-hidden">
+        <table class="w-full text-left text-sm text-gray-300">
+          <thead class="bg-[#161b22] text-xs uppercase text-gray-400 border-b border-[#30363d]">
+            <tr>
+              <th class="px-4 py-3">Case ID</th>
+              <th class="px-4 py-3">Task Name</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Grader</th>
+              <th class="px-4 py-3">Steps</th>
+              <th class="px-4 py-3">Time</th>
+              <th class="px-4 py-3">Score &amp; Notes</th>
+            </tr>
+          </thead>
+          <tbody id="eval-table-body" class="divide-y divide-[#30363d]">
+            <tr>
+              <td colspan="7" class="text-center py-8 text-gray-500">Click "Run Benchmark Suite" to execute test cases.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 3: TOOLS REGISTRY -->
+    <div id="view-tools" class="hidden space-y-4">
+      <div class="glass-card p-5">
+        <h2 class="text-base font-semibold text-white mb-1">Registered Tools</h2>
+        <p class="text-xs text-gray-400">All tools currently registered in the Loki agent runtime.</p>
+      </div>
+      <div id="tools-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Loaded dynamically -->
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    function switchTab(tab) {
+      ['agent', 'eval', 'tools'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        const btn = document.getElementById(`tab-${t}`);
+        btn.classList.remove('bg-indigo-600', 'text-white', 'shadow');
+        btn.classList.add('text-gray-400');
+      });
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tab-${tab}`);
+      activeBtn.classList.remove('text-gray-400');
+      activeBtn.classList.add('bg-indigo-600', 'text-white', 'shadow');
+
+      if (tab === 'tools') {
+        loadTools();
+      }
+    }
+
+    function setPrompt(text) {
+      document.getElementById('prompt-input').value = text;
+    }
+
+    async function runAgent() {
+      const prompt = document.getElementById('prompt-input').value.trim();
+      const model = document.getElementById('model-select').value;
+      if (!prompt) return;
+
+      const timeline = document.getElementById('step-timeline');
+      timeline.innerHTML = '';
+      
+      const btn = document.getElementById('btn-run');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executing...';
+
+      document.getElementById('stat-status').innerText = 'Running...';
+      document.getElementById('stat-status').className = 'text-indigo-400';
+
+      try {
+        const res = await fetch('/api/agent/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, model })
+        });
+        const data = await res.json();
+
+        // Render Telemetry
+        document.getElementById('stat-tokens').innerText = data.total_usage.total_tokens;
+        document.getElementById('stat-latency').innerText = `${Math.round(data.total_latency_ms)}ms`;
+        document.getElementById('stat-status').innerText = data.status;
+        document.getElementById('stat-status').className = data.status === 'success' ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold';
+
+        // Render Steps
+        timeline.innerHTML = '';
+        data.steps.forEach(step => {
+          const stepEl = document.createElement('div');
+          stepEl.className = 'border border-[#30363d] rounded-lg p-4 bg-[#161b22]/60 space-y-3';
+          
+          let toolHtml = '';
+          if (step.tool_calls && step.tool_calls.length > 0) {
+            step.tool_calls.forEach((tc, idx) => {
+              const result = step.tool_results[idx] || {};
+              toolHtml += `
+                <div class="bg-[#0d1117] rounded p-3 border border-[#30363d] text-xs font-mono">
+                  <div class="flex items-center justify-between text-indigo-400 font-semibold mb-1">
+                    <span><i class="fa-solid fa-gear mr-1"></i> Tool: ${tc.name}</span>
+                    <span class="text-gray-400">${Math.round(result.execution_time_ms || 0)}ms</span>
+                  </div>
+                  <div class="text-gray-400 mb-2">Args: ${JSON.stringify(tc.arguments)}</div>
+                  <div class="text-emerald-300 bg-[#161b22] p-2 rounded border border-[#30363d]">Output: ${result.output}</div>
+                </div>
+              `;
+            });
+          }
+
+          stepEl.innerHTML = `
+            <div class="flex items-center justify-between text-xs font-semibold text-gray-400">
+              <span class="px-2 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-700/50">Step ${step.step_number}</span>
+              <span>${Math.round(step.latency_ms)}ms • ${step.token_usage.total_tokens} tokens</span>
+            </div>
+            ${step.thought ? `<div class="text-sm text-gray-200"><i class="fa-solid fa-brain text-purple-400 mr-2"></i>${step.thought}</div>` : ''}
+            ${toolHtml}
+          `;
+          timeline.appendChild(stepEl);
+        });
+
+        // Final Response Card
+        const finalCard = document.createElement('div');
+        finalCard.className = 'border border-emerald-500/40 rounded-lg p-4 bg-emerald-950/20';
+        finalCard.innerHTML = `
+          <div class="text-xs uppercase font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
+            <i class="fa-solid fa-check-circle"></i> Final Answer
+          </div>
+          <div class="text-sm text-white whitespace-pre-wrap">${data.final_response}</div>
+        `;
+        timeline.appendChild(finalCard);
+
+      } catch (err) {
+        timeline.innerHTML = `<div class="text-red-400 p-4 border border-red-500/30 rounded">Error: ${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Agent';
+      }
+    }
+
+    async function runEvalBenchmark() {
+      const btn = document.getElementById('btn-eval');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running Suite...';
+
+      try {
+        const res = await fetch('/api/eval/run', { method: 'POST' });
+        const summary = await res.json();
+
+        document.getElementById('eval-summary').classList.remove('hidden');
+        document.getElementById('eval-pass-rate').innerText = `${summary.pass_rate}%`;
+        document.getElementById('eval-ratio').innerText = `${summary.passed_cases} / ${summary.total_cases}`;
+        document.getElementById('eval-latency').innerText = `${Math.round(summary.avg_latency_per_case_ms)}ms`;
+        document.getElementById('eval-tokens').innerText = summary.total_tokens;
+
+        const tbody = document.getElementById('eval-table-body');
+        tbody.innerHTML = '';
+
+        summary.results.forEach(r => {
+          const row = document.createElement('tr');
+          row.className = 'hover:bg-[#161b22]/50';
+          row.innerHTML = `
+            <td class="px-4 py-3 font-mono text-xs text-gray-400">${r.case_id}</td>
+            <td class="px-4 py-3 font-medium text-white">${r.case_id.replace('_', ' ')}</td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded text-xs font-semibold ${r.passed ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}">
+                ${r.passed ? 'PASSED' : 'FAILED'}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-xs text-gray-400">Rule/Contain</td>
+            <td class="px-4 py-3 text-xs">${r.run_result.steps.length}</td>
+            <td class="px-4 py-3 text-xs">${Math.round(r.duration_ms)}ms</td>
+            <td class="px-4 py-3 text-xs text-gray-300">${r.reason}</td>
+          `;
+          tbody.appendChild(row);
+        });
+
+      } catch (err) {
+        alert('Eval failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Benchmark Suite';
+      }
+    }
+
+    async function loadTools() {
+      const container = document.getElementById('tools-container');
+      try {
+        const res = await fetch('/api/tools');
+        const tools = await res.json();
+        container.innerHTML = '';
+
+        tools.forEach(t => {
+          const card = document.createElement('div');
+          card.className = 'glass-card p-4 space-y-2';
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-indigo-400 font-semibold text-sm">${t.name}</span>
+              <span class="text-xs px-2 py-0.5 bg-[#21262d] rounded text-gray-400 border border-[#30363d]">Tool</span>
+            </div>
+            <p class="text-xs text-gray-300">${t.description}</p>
+            <div class="bg-[#0d1117] p-2 rounded text-[11px] font-mono text-gray-400 border border-[#30363d] overflow-x-auto">
+              ${JSON.stringify(t.parameters_schema || {}, null, 2)}
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (err) {
+        container.innerHTML = `<p class="text-red-400 text-sm">Failed to load tools: ${err.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

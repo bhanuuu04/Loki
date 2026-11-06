@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loki-agent"
+version = "0.1.0"
+description = "A lightweight, production-ready Full-Stack Agent Harness Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "rich>=13.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "python-dotenv>=1.0.0"
+]
+
+[project.scripts]
+loki = "loki.cli.main:cli_entrypoint"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["loki*"]

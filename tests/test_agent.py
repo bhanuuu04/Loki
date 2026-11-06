@@ -1,0 +1,27 @@
+import pytest
+from loki.runtime.agent import LokiAgent
+from loki.types import RunStatus, EventType
+
+
+@pytest.mark.asyncio
+async def test_agent_execution_loop():
+    agent = LokiAgent(provider="mock")
+    events = []
+    agent.add_listener(lambda e: events.append(e.event_type))
+
+    result = await agent.run("Please calculate 25 * 4 using the calculator tool.")
+    
+    assert result.status == RunStatus.SUCCESS
+    assert len(result.steps) >= 1
+    assert result.total_usage.total_tokens > 0
+    assert EventType.RUN_START in events
+    assert EventType.RUN_END in events
+
+
+@pytest.mark.asyncio
+async def test_agent_step_limit():
+    # Set max steps to 0 or 1 with an iterative prompt to test step bounds
+    agent = LokiAgent(provider="mock", max_steps=1)
+    result = await agent.run("Please calculate 25 * 4 using the calculator tool.")
+    # In step 1, mock agent invokes calculator tool. Since max_steps=1, it should stop gracefully
+    assert result.status in (RunStatus.SUCCESS, RunStatus.MAX_STEPS_REACHED)

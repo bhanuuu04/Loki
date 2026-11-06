@@ -1,0 +1,42 @@
+{
+  "name": "Loki Core Evaluation Benchmark",
+  "description": "Evaluates reasoning, mathematical tool usage, python code execution, and file inspection.",
+  "cases": [
+    {
+      "id": "math_multiplication",
+      "name": "Math Multiplication Test",
+      "description": "Tests if agent correctly invokes calculator tool for 25 * 4",
+      "prompt": "Please calculate 25 * 4 using your calculator tool.",
+      "expected_output": "100",
+      "grader_type": "contains",
+      "tags": ["math", "tool_use"]
+    },
+    {
+      "id": "math_division",
+      "name": "Math Division Test",
+      "description": "Tests division calculation",
+      "prompt": "What is 150 / 3? Calculate it.",
+      "expected_output": "50",
+      "grader_type": "contains",
+      "tags": ["math", "tool_use"]
+    },
+    {
+      "id": "python_range_sum",
+      "name": "Python Execution Test",
+      "description": "Tests Python tool invocation",
+      "prompt": "Run python code to calculate sum of numbers from 1 to 10.",
+      "expected_output": "completed successfully",
+      "grader_type": "contains",
+      "tags": ["coding", "tool_use"]
+    },
+    {
+      "id": "file_reader_test",
+      "name": "File Reading Test",
+      "description": "Tests filesystem tool",
+      "prompt": "Read the file sample.txt and report the contents.",
+      "expected_output": "completed successfully",
+      "grader_type": "contains",
+      "tags": ["filesystem", "tool_use"]
+    }
+  ]
+}
