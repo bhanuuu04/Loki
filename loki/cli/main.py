@@ -21,6 +21,7 @@ from loki.types import AgentEvent, EventType, RunResult
 from loki.cli.doctor import LokiDoctor
 from loki.cli.setup import run_setup_wizard
 from loki.cli.interface import LokiConversationalCLI
+from loki.cli.model_cmd import run_model_command
 from loki.providers.factory import get_provider
 from loki.providers.compatibility import ModelCompatibilityTester
 
@@ -143,8 +144,15 @@ def cli_entrypoint():
     parser.add_argument("-v", "--version", action="version", version=f"Loki {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
-    # Command: setup
-    subparsers.add_parser("setup", help="Run interactive first-time setup wizard")
+    # Command: onboard (and setup)
+    onboard_parser = subparsers.add_parser("onboard", help="Run interactive onboarding wizard")
+    onboard_parser.add_argument("--reset", "-reset", action="store_true", help="Reset configuration and re-onboard")
+
+    setup_parser = subparsers.add_parser("setup", help="Run interactive first-time setup wizard")
+    setup_parser.add_argument("--reset", "-reset", action="store_true", help="Reset configuration and re-onboard")
+
+    # Command: model (interactive arrow-key switcher)
+    subparsers.add_parser("model", help="Interactively select and change AI model using arrow keys")
 
     # Command: doctor
     subparsers.add_parser("doctor", help="Run complete system health and platform diagnostics")
@@ -196,8 +204,12 @@ def cli_entrypoint():
 
     args = parser.parse_args()
 
-    if args.command == "setup":
-        asyncio.run(run_setup_wizard())
+    if args.command in ("onboard", "setup"):
+        reset_flag = getattr(args, "reset", False)
+        asyncio.run(run_setup_wizard(reset=reset_flag))
+
+    elif args.command == "model":
+        run_model_command()
 
     elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())

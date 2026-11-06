@@ -44,5 +44,5 @@ echo "[1/2] Installing Loki package and dependencies..."
 $RUN_PIP install --upgrade pip --quiet $PIP_FLAGS 2>/dev/null || true
 $RUN_PIP install -e . --quiet $PIP_FLAGS
 
-echo "[2/2] Launching interactive setup wizard..."
-exec $RUN_PYTHON -m loki.cli.main setup
+echo "[2/2] Launching interactive onboarding wizard..."
+exec $RUN_PYTHON -m loki.cli.main onboard "$@"

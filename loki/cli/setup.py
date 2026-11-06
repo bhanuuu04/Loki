@@ -1,6 +1,7 @@
 """
-Loki First-Run Interactive Setup Wizard.
+Loki First-Run Interactive Onboarding & Setup Wizard.
 Guides the user through setting up NVIDIA NIM or alternative providers.
+Supports arrow-key navigation for provider and model selection.
 """
 
 import os
@@ -10,53 +11,49 @@ from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 
 from loki.config import settings
+from loki.cli.menu import select_from_menu
+from loki.cli.model_cmd import choose_model_interactive
+from loki.cli.env_utils import update_env_file, reset_configuration
 from loki.providers.nvidia_provider import NvidiaNimProvider
 from loki.providers.compatibility import ModelCompatibilityTester
 
 console = Console(force_terminal=True)
 
 
-def update_env_file(key_values: dict) -> None:
-    """Updates or adds key-value pairs in the local .env file preserving other content."""
-    env_path = Path.cwd() / ".env"
-    existing_lines = []
-    existing_keys = set()
+async def run_setup_wizard(reset: bool = False):
+    if reset:
+        reset_configuration()
+        console.print("[yellow]✔ Existing configuration has been reset to defaults.[/yellow]\n")
 
-    if env_path.exists():
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#") and "=" in stripped:
-                    k = stripped.split("=", 1)[0].strip()
-                    existing_keys.add(k)
-                    if k in key_values:
-                        existing_lines.append(f"{k}={key_values[k]}\n")
-                    else:
-                        existing_lines.append(line)
-                else:
-                    existing_lines.append(line)
-
-    for k, v in key_values.items():
-        if k not in existing_keys:
-            existing_lines.append(f"{k}={v}\n")
-
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(existing_lines)
-
-
-async def run_setup_wizard():
     console.print("\n" + "=" * 60, style="bold cyan")
-    console.print("       LOKI AGENT HARNESS — FIRST-RUN SETUP WIZARD       ", style="bold cyan")
+    console.print("       LOKI ONBOARDING — INTERACTIVE SETUP WIZARD       ", style="bold cyan")
     console.print("=" * 60 + "\n", style="bold cyan")
 
-    console.print("Loki requires an LLM provider to power its autonomous agent reasoning.\n"
-                  "[bold green]NVIDIA NIM[/bold green] is the recommended first-class provider for performance and scale.\n")
+    console.print("Loki requires an AI model to power its reasoning and cybersecurity analysis.\n"
+                  "[bold green]NVIDIA NIM[/bold green] is the recommended first-class provider for high performance.\n")
 
-    provider_choice = Prompt.ask(
-        "Select LLM Provider",
-        choices=["nvidia", "mock", "gemini", "openai", "ollama"],
-        default="nvidia",
+    provider_options = [
+        "nvidia",
+        "mock",
+        "gemini",
+        "openai",
+        "ollama",
+    ]
+    provider_descriptions = [
+        "NVIDIA NIM (Recommended - Llama 3.3 70B, Nemotron, Mistral Large)",
+        "Offline Mock (Runs 100% offline without API keys for testing)",
+        "Google Gemini (Gemini 2.5 Flash / Pro via API key)",
+        "OpenAI (GPT-4o / GPT-4o-mini via API key)",
+        "Local Ollama (Local llama3 via localhost:11434)",
+    ]
+
+    selected_provider_idx = select_from_menu(
+        title="Select AI Provider",
+        options=provider_options,
+        default_index=0,
+        descriptions=provider_descriptions,
     )
+    provider_choice = provider_options[selected_provider_idx]
 
     env_updates = {"LOKI_PROVIDER": provider_choice}
 
@@ -75,10 +72,8 @@ async def run_setup_wizard():
             default=settings.nvidia_nim_base_url or "https://integrate.api.nvidia.com/v1",
         ).strip()
 
-        model_id = Prompt.ask(
-            "Select or enter NVIDIA NIM Model ID",
-            default=settings.nvidia_nim_model or "meta/llama-3.3-70b-instruct",
-        ).strip()
+        # Arrow-key navigable model selection!
+        model_id = choose_model_interactive(current_model=settings.nvidia_nim_model or "meta/llama-3.3-70b-instruct")
 
         env_updates["NVIDIA_NIM_API_KEY"] = api_key
         env_updates["NVIDIA_NIM_BASE_URL"] = base_url
@@ -107,7 +102,7 @@ async def run_setup_wizard():
                             console.print(f"  - {t.name}: {t.details}")
 
     elif provider_choice == "mock":
-        console.print("\n[yellow]Mock Provider selected. Runs 100% offline without API keys.[/yellow]")
+        console.print("\n[yellow]Offline Mock Provider selected. No API keys needed.[/yellow]")
         update_env_file(env_updates)
 
     else:
@@ -115,10 +110,11 @@ async def run_setup_wizard():
         console.print(f"\n[green]✔ Provider '{provider_choice}' configured in .env.[/green]")
 
     console.print("\n" + "=" * 60, style="bold green")
-    console.print("                 SETUP COMPLETE!                          ", style="bold green")
+    console.print("               ONBOARDING COMPLETE!                       ", style="bold green")
     console.print("=" * 60 + "\n", style="bold green")
 
-    console.print("You can now start chatting with Loki immediately:\n")
-    console.print("  [bold cyan]loki[/bold cyan]                Launch interactive Hermes-style chat", style="white")
-    console.print("  [bold cyan]loki doctor[/bold cyan]         Verify system health diagnostics", style="white")
-    console.print("  [bold cyan]loki start[/bold cyan]          Start Web UI on http://127.0.0.1:8000\n", style="white")
+    console.print("Launch Loki anytime with:\n")
+    console.print("  [bold cyan]loki[/bold cyan]                Launch conversational chat", style="white")
+    console.print("  [bold cyan]loki model[/bold cyan]          Switch AI models with arrow keys", style="white")
+    console.print("  [bold cyan]loki onboard --reset[/bold cyan] Restart setup wizard and reset configuration", style="white")
+    console.print("  [bold cyan]loki doctor[/bold cyan]         Run system health diagnostic\n", style="white")

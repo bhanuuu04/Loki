@@ -19,7 +19,8 @@ from loki.runtime.agent import LokiAgent
 from loki.security.scope_manager import ScopeManager
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
 from loki.providers.factory import get_provider
-from loki.types import AgentEvent, EventType, RunResult
+from loki.cli.model_cmd import choose_model_interactive
+from loki.cli.env_utils import update_env_file
 
 console = Console(force_terminal=True)
 
@@ -114,11 +115,14 @@ class LokiConversationalCLI:
 
         elif sub == "/model":
             if not arg:
-                console.print(f"Active model: [green]{self.model_name}[/green]. Specify a model ID: `/model meta/llama-3.3-70b-instruct`")
+                selected = choose_model_interactive(current_model=self.model_name)
+                self.model_name = selected
             else:
                 self.model_name = arg
-                self.agent.provider = get_provider(self.provider_name, model=self.model_name)
-                console.print(f"[bold green]✔ Model updated to:[/bold green] {self.model_name}")
+
+            self.agent.provider = get_provider(self.provider_name, model=self.model_name)
+            update_env_file({"LOKI_MODEL": self.model_name, "NVIDIA_NIM_MODEL": self.model_name})
+            console.print(f"[bold green]✔ Model updated to:[/bold green] [bold cyan]{self.model_name}[/bold cyan]")
 
         elif sub == "/provider":
             if not arg:

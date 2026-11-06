@@ -12,6 +12,6 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-echo [2/2] Launching interactive setup wizard...
-python -m loki.cli.main setup
+echo [2/2] Launching interactive onboarding wizard...
+python -m loki.cli.main onboard %*
 endlocal
