@@ -31,3 +31,11 @@ def test_env_utils_lifecycle(tmp_path, monkeypatch):
     reset_configuration()
     reset_content = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "DEFAULT_SETTING=123" in reset_content
+
+
+def test_select_from_menu_non_tty(monkeypatch):
+    import sys
+    from loki.cli.menu import select_from_menu
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    idx = select_from_menu("Test Menu", ["Option A", "Option B", "Option C"], default_index=1)
+    assert idx == 1

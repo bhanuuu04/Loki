@@ -21,22 +21,26 @@ def _get_key_windows() -> str:
         ch = msvcrt.getch()
         if ch in (b"\x00", b"\xe0"):
             ch2 = msvcrt.getch()
-            if ch2 == b"H":
+            if ch2 in (b"H", b"\x48"):
                 return "UP"
-            elif ch2 == b"P":
+            elif ch2 in (b"P", b"\x50"):
                 return "DOWN"
-            elif ch2 == b"K":
+            elif ch2 in (b"K", b"\x4b"):
                 return "LEFT"
-            elif ch2 == b"M":
+            elif ch2 in (b"M", b"\x4d"):
                 return "RIGHT"
         elif ch in (b"\r", b"\n"):
             return "ENTER"
-        elif ch in (b"\x03", b"\x1b"):  # Ctrl+C or ESC
-            return "EXIT"
+        elif ch == b"\x03":  # Ctrl+C
+            raise KeyboardInterrupt
         elif ch in (b"k", b"w", b"K", b"W"):
             return "UP"
         elif ch in (b"j", b"s", b"J", b"S"):
             return "DOWN"
+        elif ch.isdigit():
+            return f"NUM_{ch.decode('ascii', errors='ignore')}"
+    except KeyboardInterrupt:
+        raise
     except Exception:
         pass
     return ""
@@ -51,38 +55,47 @@ def _get_key_unix() -> str:
     try:
         old_settings = termios.tcgetattr(fd)
     except Exception:
-        # Not a terminal supporting termios
         return "ENTER"
 
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            # Check if more characters are available immediately (escape sequence)
-            r, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if r:
-                ch2 = sys.stdin.read(1)
-                if ch2 in ("[", "O"):
-                    r2, _, _ = select.select([sys.stdin], [], [], 0.05)
-                    if r2:
-                        ch3 = sys.stdin.read(1)
-                        if ch3 == "A":
-                            return "UP"
-                        elif ch3 == "B":
-                            return "DOWN"
-                        elif ch3 == "C":
-                            return "RIGHT"
-                        elif ch3 == "D":
-                            return "LEFT"
-            return "EXIT"
-        elif ch in ("\r", "\n"):
+        ch = os.read(fd, 1)
+        if ch == b"\x1b":
+            # Read subsequent bytes of escape sequence with timeout
+            seq = b""
+            while True:
+                r, _, _ = select.select([fd], [], [], 0.15)
+                if not r:
+                    break
+                part = os.read(fd, 1)
+                if not part:
+                    break
+                seq += part
+                if part.isalpha() or part == b"~":
+                    break
+
+            if seq in (b"[A", b"OA", b"[1;5A", b"[1;2A") or seq.endswith(b"A"):
+                return "UP"
+            elif seq in (b"[B", b"OB", b"[1;5B", b"[1;2B") or seq.endswith(b"B"):
+                return "DOWN"
+            elif seq in (b"[C", b"OC"):
+                return "RIGHT"
+            elif seq in (b"[D", b"OD"):
+                return "LEFT"
+            return ""
+
+        elif ch in (b"\r", b"\n"):
             return "ENTER"
-        elif ch in ("\x03", "\x04"):  # Ctrl+C / Ctrl+D
-            return "EXIT"
-        elif ch in ("k", "w", "K", "W"):
+        elif ch == b"\x03":  # Ctrl+C
+            raise KeyboardInterrupt
+        elif ch == b"\x04":  # Ctrl+D
+            return "ENTER"
+        elif ch in (b"k", b"w", b"K", b"W"):
             return "UP"
-        elif ch in ("j", "s", "J", "S"):
+        elif ch in (b"j", b"s", b"J", b"S"):
             return "DOWN"
+        elif ch.isdigit():
+            return f"NUM_{ch.decode('ascii', errors='ignore')}"
         return ""
     finally:
         try:
@@ -141,7 +154,7 @@ def _render_menu_panel(
     return Panel(
         table,
         title=f"[bold cyan]{title}{scroll_hint}[/bold cyan]",
-        subtitle="[dim]Use [bold]↑/↓[/bold] arrows (or j/k) to navigate, [bold]Enter[/bold] to select[/dim]",
+        subtitle="[dim]Use [bold]↑/↓[/bold] arrows (or j/k, 1-9) to navigate, [bold]Enter[/bold] to select[/dim]",
         border_style="cyan",
     )
 
@@ -176,15 +189,20 @@ def select_from_menu(
             live.update(_render_menu_panel(title, options, current_idx, descriptions))
             live.refresh()
 
-            key = get_key()
+            try:
+                key = get_key()
+            except (KeyboardInterrupt, EOFError):
+                break
+
             if key == "UP":
                 current_idx = (current_idx - 1) % len(options)
             elif key == "DOWN":
                 current_idx = (current_idx + 1) % len(options)
+            elif key.startswith("NUM_"):
+                num = int(key.split("_")[1])
+                if 1 <= num <= len(options):
+                    current_idx = num - 1
             elif key == "ENTER":
                 break
-            elif key == "EXIT":
-                console.print("\n[dim]Selection cancelled.[/dim]")
-                sys.exit(0)
 
     return current_idx
