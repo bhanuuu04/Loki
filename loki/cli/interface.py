@@ -521,7 +521,7 @@ class LokiConversationalCLI:
                 console.print(
                     Panel(
                         tool_performance_memory.summary(task_type),
-                        title=f"Tool Effectiveness Memory{f' — {task_type}' if task_type else ''}",
+                        title=(f"Tool Effectiveness Memory — {task_type}" if task_type else "Tool Effectiveness Memory"),
                         border_style="cyan",
                     )
                 )
