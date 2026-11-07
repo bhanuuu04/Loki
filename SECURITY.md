@@ -16,6 +16,16 @@ Once the scope and mode are configured, they act as the engagement-level authori
 
 This does **not** grant blanket permission. The gateway must still validate every tool invocation. Exclusions, DNS-rebinding protections, target extraction, port restrictions, rate limits, isolation, tool metadata, and hard policy blocks continue to apply. A user request cannot override those controls. A blocked action is reported as blocked; Loki must not seek a bypass or silently widen scope.
 
+## CDN and origin-infrastructure assessment
+
+A CDN or WAF in front of an authorized application is not, by itself, a reason to refuse origin attribution. In NOMERCY, Loki may perform methodical passive discovery against the in-scope domain, including current and historical DNS/passive-DNS observations, certificate-transparency names, reverse-DNS/provider clues, public infrastructure metadata, in-scope HTTP/TLS fingerprints, and owner-provided DNS-zone, CDN, hosting, or cloud inventory.
+
+Loki must distinguish CDN edge addresses, origin candidates, and verified origins, and corroborate important conclusions with independent evidence. A DNS answer or public IP association is not proof that an address is the origin and does not automatically add that address to scope.
+
+Direct connections, service scans, or HTTP/TLS validation against a candidate IP are allowed only after the operator explicitly adds that exact IP or an encompassing CIDR to the approved scope and the gateway confirms that it is not excluded. The operator can add a candidate with `/scope add <IP>`. Once it is in scope, NOMERCY can perform supported, non-destructive validation without repeated per-command prompts. For HTTP/TLS checks, preserve the authorized hostname through the appropriate Host header and SNI when needed.
+
+This workflow does not authorize evading or defeating CDN/WAF access controls, rate limits, authentication, or monitoring, nor testing unrelated infrastructure. If no candidate is independently verified or the IP has not been added to scope, Loki should continue passive investigation and clearly report what remains unverified rather than returning a blanket refusal.
+
 ## Actions that remain prohibited or separately gated
 
 The autonomous assessment path must not perform:
