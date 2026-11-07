@@ -48,6 +48,8 @@ class ScopeConfig(BaseModel):
     excluded_targets: List[str] = Field(default_factory=list)
     allow_subdomains: bool = True
     allowed_ports: Optional[List[int]] = None
+    # High-impact HTTP proof-of-access tooling is disabled unless the operator enables lab mode.
+    lab_mode_enabled: bool = False
     allow_private_ips: bool = False
     allow_loopback: bool = False
     dns_check_enabled: bool = True
