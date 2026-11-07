@@ -37,9 +37,9 @@ You have access to specialized security tools, knowledge bases (CWE, OWASP Top 1
 Operational Rules:
 1. Scope & Authorization: You must operate strictly within the declared and authorized assessment scope. All tool executions are strictly mediated by the Execution Gateway and verified against authorized targets and CIDRs. Never attempt to expand scope or target out-of-scope assets autonomously.
 2. Built-in Tools: Always prefer built-in tools (e.g. enumerate_subdomains, dns_lookup, audit_http_security_headers) for reconnaissance instead of guessing external commands.
-3. System Environment: You operate in an interactive user shell without root/sudo access. Never run package manager installations (e.g. `apt-get install`, `dnf`, `brew`) as they fail due to permission locks. If an external tool is missing on PATH, use alternative built-in modules or inform the user how they can install it with sudo.
+3. System Environment: You operate in an interactive user shell without root/sudo access. Never run package manager installations such as apt-get, dnf, or brew. If an external tool is missing on PATH, use alternative built-in modules or inform the user how they can install it with sudo.
 4. Python Scripts: Use python_exec for offline analysis and scripts inside the isolated no-network container. Do not claim that a script reached a target unless a dedicated scoped network tool confirms it.
-5. Lab proof-of-access: In NOMERCY, only use verify_lab_data_access when the operator has enabled /lab mode and supplied a LOKI-LAB-CANARY marker seeded in a dummy record. You may send one payload in one query parameter, but the marker itself must never be placed in the request. When a payload is supplied, the tool compares a no-payload control response with the injected response. Claim an injection verified only when the canary is absent from the control response and present in the injected response. If the canary is already accessible without the payload, report data access but do not claim the payload caused an exploit. A direct canary fetch without a payload is not proof of exploitability. Never infer successful compromise from a reflected payload, HTTP status, or SQL error alone.
+5. Lab proof-of-access: In NOMERCY, only use verify_lab_data_access when the operator has enabled /lab mode and supplied a LOKI-LAB-CANARY marker seeded in a dummy record. You may send one payload in one query parameter, but the marker itself must never be placed in the request. When a payload is supplied, the tool compares a no-payload control response with the injected response. Claim an injection verified only when the canary is absent in the control response and present in the injected response. If the canary is already accessible without the payload, report data access but do not claim the payload caused an exploit. A direct canary fetch without a payload is not proof of exploitability. Never infer successful compromise from a reflected payload, HTTP status, or SQL error alone.
 6. Reporting: Present findings systematically in clear GitHub-flavored Markdown. Group results with bullet points or tables, and provide clear remediation guidance.
 """
 
@@ -75,6 +75,7 @@ class LokiAgent:
         self.memory_store = memory_store or MemoryStore()
 
         self.security_context = AssessmentSecurityContext.get_default()
+        self._follow_default_security_context = gateway is None
         self.gateway = gateway or self.security_context.gateway
         self.registry = ToolRegistry(gateway=self.gateway)
         if include_builtins:
@@ -88,6 +89,59 @@ class LokiAgent:
                 self.registry.register(t)
 
         self._event_listeners: List[Callable[[AgentEvent], Any]] = []
+
+    def _refresh_security_context(self) -> None:
+        """
+        Rebind a default-backed agent if the process-wide assessment context changed.
+
+        CLI scope commands and security tools resolve the current default context.
+        Refreshing here prevents an agent created before a context reset from
+        continuing to authorize against an obsolete ScopeManager/Gateway.
+        Explicitly supplied gateways remain bound to their caller-provided context.
+        """
+        if not self._follow_default_security_context:
+            return
+
+        current_context = AssessmentSecurityContext.get_default()
+        if current_context is self.security_context:
+            return
+
+        self.security_context = current_context
+        self.gateway = current_context.gateway
+        self.registry.set_gateway(self.gateway)
+
+    def _build_runtime_system_prompt(self) -> str:
+        """
+        Add an authoritative snapshot of the live scope and policy to the prompt.
+
+        The snapshot is rebuilt for every run so old chat history cannot override
+        scope changes made through operator commands.
+        """
+        scope_manager = self.gateway.scope_manager
+        config = scope_manager.config
+        mode = getattr(self.gateway.policy_engine.mode, "value", str(self.gateway.policy_engine.mode))
+        targets = sorted(config.targets)
+        exclusions = sorted(config.excluded_targets)
+
+        target_lines = "\n".join(f"- {target}" for target in targets) or "- None"
+        exclusion_lines = "\n".join(f"- {target}" for target in exclusions) or "- None"
+
+        return (
+            f"{self.system_prompt.rstrip()}\n\n"
+            "LIVE AUTHORIZATION SNAPSHOT (refreshed immediately before this run)\n"
+            f"Assessment: {config.assessment_name}\n"
+            f"Scope version: {config.version}\n"
+            f"Execution mode: {str(mode).upper()}\n"
+            f"Authorized targets ({len(targets)}):\n{target_lines}\n"
+            f"Excluded targets ({len(exclusions)}):\n{exclusion_lines}\n"
+            f"Subdomains allowed: {bool(config.allow_subdomains)}\n"
+            f"Lab verification enabled: {bool(config.lab_mode_enabled)}\n\n"
+            "This snapshot is the current operator-approved scope. Do not repeat an older "
+            "target list from conversation history or claim that a listed target is out of "
+            "scope based on stale context. Prefer the built-in authorization/DNS tools when "
+            "checking a target. The Execution Gateway remains the final authority and may "
+            "still reject an address that resolves into a forbidden or excluded network.\n"
+        )
 
     def add_listener(self, listener: Callable[[AgentEvent], Any]) -> None:
         """Register a callback to receive real-time execution events."""
@@ -124,13 +178,21 @@ class LokiAgent:
             {"prompt": prompt, "model": self.provider.model, "session_id": session_id},
         )
 
+        # Resolve the current shared security state before loading or creating chat history.
+        self._refresh_security_context()
+        runtime_system_prompt = self._build_runtime_system_prompt()
+
         # Initialize or load context
         if context is None:
             if session_id:
-                context = self.memory_store.load_session(session_id, system_prompt=self.system_prompt)
+                context = self.memory_store.load_session(
+                    session_id, system_prompt=runtime_system_prompt
+                )
             else:
-                context = AgentContext(system_prompt=self.system_prompt)
+                context = AgentContext(system_prompt=runtime_system_prompt)
 
+        # Replace any saved/stale system message with the current live authorization snapshot.
+        context.set_system_prompt(runtime_system_prompt)
         context.add_user_message(prompt)
 
         steps: List[AgentStep] = []
