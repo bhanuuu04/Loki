@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Execution Gateway for Loki 2.0.
 Mandatory single-choke-point security gateway for all tool invocations.
@@ -16,6 +18,7 @@ Enforces:
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import inspect
+import ipaddress
 import json
 import re
 import time
@@ -74,7 +77,7 @@ class ExecutionGateway:
         cls._default_instance = gateway
 
     def extract_targets(self, tool_name: str, args: Dict[str, Any]) -> List[str]:
-        """Extract potential host/domain/IP targets from tool arguments."""
+        """Extract potential host/domain/IP targets from tool arguments and command strings."""
         targets: List[str] = []
 
         # Common target argument names
@@ -83,7 +86,6 @@ class ExecutionGateway:
             if key in args:
                 val = args[key]
                 if isinstance(val, str) and val.strip():
-                    # Handle comma-separated lists
                     for part in val.split(","):
                         cleaned = part.strip()
                         if cleaned:
@@ -93,17 +95,47 @@ class ExecutionGateway:
                         if isinstance(item, str) and item.strip():
                             targets.append(item.strip())
 
-        # For shell commands or general strings, extract URLs or domain names
+        # For shell commands or general strings, extract URLs, IPs, and command targets
         for k, v in args.items():
             if isinstance(v, str) and k not in target_keys:
-                # Extract http/https URLs
-                urls = re.findall(r"https?://[a-zA-Z0-9_\-\.:]+", v)
+                # 1. Extract http/https URLs
+                urls = re.findall(r"https?://[^\s\"'<>]+", v)
                 for u in urls:
                     targets.append(u)
 
+                # 2. Extract raw IPv4 addresses
+                raw_ips = re.findall(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:/[0-9]{1,2})?\b", v)
+                for ip_str in raw_ips:
+                    try:
+                        ipaddress.ip_network(ip_str, strict=False)
+                        targets.append(ip_str)
+                    except ValueError:
+                        pass
+
+                # 3. Extract targets following network commands (e.g. nmap, ping, curl, dig, etc.)
+                net_cmd_match = re.findall(
+                    r"\b(?:nmap|curl|wget|ping|nc|netcat|ssh|telnet|dig|nslookup|traceroute|nikto|sqlmap|ffuf)\s+(?:-[^\s]+\s+)*([a-zA-Z0-9_\-\.]+)",
+                    v,
+                    re.IGNORECASE,
+                )
+                for tgt in net_cmd_match:
+                    if not tgt.startswith("-") and ("." in tgt or tgt in ("localhost", "metadata")):
+                        targets.append(tgt)
+
+                # 4. Extract targets passed to --target, -u, --url, -t, etc.
+                flag_targets = re.findall(
+                    r"(?:--target|-u|--url|-t|--host|-h)\s+([^\s\"'>]+)",
+                    v,
+                    re.IGNORECASE,
+                )
+                for ft in flag_targets:
+                    cleaned_ft = ft.strip("\"'")
+                    if cleaned_ft and not cleaned_ft.startswith("-"):
+                        targets.append(cleaned_ft)
+
         return list(dict.fromkeys(targets))  # Deduplicate preserving order
 
-    def validate_arguments(self, tool_instance: Optional[Tool], args: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_arguments(self, tool_instance: Optional["Tool"], args: Dict[str, Any]) -> Tuple[bool, str]:
         """Validate argument existence and types against tool signature and schema."""
         if tool_instance is None:
             return True, "No tool instance to validate against"
@@ -226,7 +258,7 @@ class ExecutionGateway:
     async def execute(
         self,
         tool_call: ToolCall,
-        tool_instance: Optional[Tool],
+        tool_instance: Optional["Tool"],
     ) -> ToolResult:
         """
         Execute a tool invocation strictly through all security gateway stages:
@@ -295,13 +327,47 @@ class ExecutionGateway:
         # -------------------------------------------------------------
         # 4. SCOPE BOUNDARY VALIDATION
         # -------------------------------------------------------------
-        # Tools that perform network / target scanning MUST have their targets in scope
-        network_tools = {
-            "dns_lookup", "enumerate_subdomains", "port_scan", "audit_http_security_headers",
-            "check_ssl_tls_configuration", "web_endpoint_discovery", "check_scope_authorization"
-        }
+        from loki.tools.base import ToolCapability
 
-        if targets and (tool_name in network_tools or tool_name.startswith("nmap") or tool_name.startswith("audit")):
+        is_network_tool = False
+        is_target_interaction = False
+        if tool_instance:
+            is_network_tool = (
+                tool_instance.has_capability(ToolCapability.NETWORK)
+                or tool_instance.has_capability(ToolCapability.SHELL)
+            )
+            is_target_interaction = tool_instance.has_capability(ToolCapability.TARGET_INTERACTION)
+
+        # Fallback check for unregistered/generic tools
+        if not is_network_tool and (
+            tool_name in ("run_command", "shell_exec", "bash", "audit_headers", "dns_lookup", "enumerate_subdomains", "port_scan")
+            or tool_name.startswith("nmap")
+        ):
+            is_network_tool = True
+
+        if is_target_interaction and not targets:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            err_msg = f"Gateway Scope Violation: Tool '{tool_name}' requires an authorized target parameter."
+            self._log_audit(
+                tool_name=tool_name,
+                target="missing",
+                args=[f"{k}={v}" for k, v in args.items()],
+                risk=CommandRisk.BLOCKED,
+                authorized=False,
+                status="blocked",
+                reason="Target interaction tool missing target parameter",
+                output_summary=err_msg,
+            )
+            return self.normalize_result(
+                tool_call.id,
+                tool_name,
+                err_msg,
+                is_error=True,
+                duration_ms=duration_ms,
+                metadata={"authorized": False, "risk": CommandRisk.BLOCKED.value},
+            )
+
+        if targets and is_network_tool:
             for target in targets:
                 in_scope, scope_reason = self.scope_manager.is_in_scope(target)
                 if not in_scope:

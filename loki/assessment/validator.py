@@ -11,6 +11,7 @@ import re
 from loki.assessment.models import (
     ConfidenceLevel,
     FindingLifecycle,
+    FindingSource,
     ReproductionRecord,
     SecurityFinding,
     SeverityLevel,
@@ -56,35 +57,53 @@ class FindingValidator:
     def evaluate_confidence(cls, finding: SecurityFinding) -> ConfidenceLevel:
         """
         Calculates evidence-based confidence based on:
-        1. Presence of reproduction record
-        2. Presence of raw evidence and payload reflection
-        3. CWE/CVE correlation
+        1. Distinction between model hypotheses and tool-confirmed findings.
+        2. Evidence provenance and response context.
+        3. Structured reproduction trail.
+        4. Verified CWE / CVE correlation (syntactic validity alone does not grant confidence).
         """
+        # Pure model hypotheses without any evidence or reproduction remain POTENTIAL
+        has_evidence = bool(finding.evidence and len(finding.evidence.strip()) > 5)
+        has_reproduction = bool(finding.reproduction and finding.reproduction.reproduced_successfully)
+
+        if finding.source == FindingSource.MODEL_HYPOTHESIS and not has_evidence and not has_reproduction:
+            return ConfidenceLevel.POTENTIAL
+
         score = 0
 
-        # Evidence length and content
+        # Evidence provenance & content
         if finding.evidence and len(finding.evidence.strip()) > 25:
             score += 2
+            if finding.evidence_provenance:
+                score += 1
         elif finding.evidence and len(finding.evidence.strip()) > 5:
+            score += 1
+
+        # Tool confirmation source
+        if finding.source in (FindingSource.TOOL_CONFIRMED, FindingSource.OPERATOR_VERIFIED):
             score += 1
 
         # Structured reproduction verified
         if finding.reproduction:
-            score += 2
+            score += 1
             if finding.reproduction.reproduced_successfully:
                 score += 3
 
-        # CWE / CVE verified
+        # CWE verified against registry
         if finding.cwe_id:
             cwe_data = lookup_cwe(finding.cwe_id)
             if cwe_data:
-                score += 1
-            else:
-                score += 1
-        if finding.cve_id and re.match(r"^CVE-\d{4}-\d{4,8}$", finding.cve_id, re.IGNORECASE):
-            score += 2
+                score += 1  # Verified existence in local database
+            # Do NOT grant points for invalid / unknown CWE
 
-        if score >= 6:
+        # CVE verified against format AND presence of tool evidence
+        if finding.cve_id and re.match(r"^CVE-\d{4}-\d{4,8}$", finding.cve_id, re.IGNORECASE):
+            # Syntactic match only gives point if evidence or affected version is present
+            if finding.evidence or (finding.reproduction and finding.reproduction.response_status):
+                score += 1
+
+        # Model hypothesis can only be CONFIRMED if reproduction was executed and verified
+        if score >= 6 and (has_reproduction or finding.source != FindingSource.MODEL_HYPOTHESIS):
             return ConfidenceLevel.CONFIRMED
         elif score >= 4:
             return ConfidenceLevel.HIGH

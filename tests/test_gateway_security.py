@@ -108,3 +108,89 @@ async def test_gateway_result_normalization(clean_gateway):
     assert "Red Text and Green Text" == res.output
     assert res.execution_time_ms >= 0.0
     assert res.metadata["authorized"] is True
+
+
+@pytest.mark.asyncio
+async def test_shell_command_embedded_target_scope_enforcement(clean_gateway):
+    """Verify shell commands cannot bypass scope checks by placing targets inside command strings."""
+    from loki.tools.builtins.shell_tools import run_command
+
+    # Shell command targeting out-of-scope internal/external targets
+    call_curl = ToolCall(id="call_curl_01", name="run_command", arguments={"command": "curl http://secret.internal/admin"})
+    res_curl = await clean_gateway.execute(call_curl, run_command)
+    assert res_curl.is_error
+    assert "Scope Violation" in res_curl.output
+
+    call_nmap = ToolCall(id="call_nmap_01", name="run_command", arguments={"command": "nmap -sV 192.168.1.50"})
+    res_nmap = await clean_gateway.execute(call_nmap, run_command)
+    assert res_nmap.is_error
+    assert "Scope Violation" in res_nmap.output
+
+    call_meta = ToolCall(id="call_meta_01", name="run_command", arguments={"command": "curl http://169.254.169.254/latest/meta-data/"})
+    res_meta = await clean_gateway.execute(call_meta, run_command)
+    assert res_meta.is_error
+    assert "Scope Violation" in res_meta.output
+
+
+@pytest.mark.asyncio
+async def test_capability_based_scope_enforcement(clean_gateway):
+    """Verify tools with ToolCapability.TARGET_INTERACTION require targets and validate them."""
+    from loki.tools.base import ToolCapability
+
+    @tool(
+        name="custom_scanner",
+        description="Custom network scanner",
+        capabilities=[ToolCapability.NETWORK, ToolCapability.TARGET_INTERACTION],
+    )
+    def custom_scanner(target: str) -> str:
+        return f"Scanned {target}"
+
+    # Target out of scope
+    call_oos = ToolCall(id="call_cust_01", name="custom_scanner", arguments={"target": "malicious.com"})
+    res_oos = await clean_gateway.execute(call_oos, custom_scanner)
+    assert res_oos.is_error
+    assert "Scope Violation" in res_oos.output
+
+    # Target in scope
+    call_in = ToolCall(id="call_cust_02", name="custom_scanner", arguments={"target": "authorized.example.com"})
+    res_in = await clean_gateway.execute(call_in, custom_scanner)
+    assert not res_in.is_error
+    assert res_in.output == "Scanned authorized.example.com"
+
+
+@pytest.mark.asyncio
+async def test_scope_synchronization_active_agent_session():
+    """Verify that updating scope via configure_scope propagates immediately to an active LokiAgent."""
+    from loki.runtime.agent import LokiAgent
+    from loki.security.context import AssessmentSecurityContext
+    from loki.tools.security_tools import configure_scope
+
+    # Reset to clean context
+    ctx = AssessmentSecurityContext.reset_default()
+    agent = LokiAgent(provider="mock")
+
+    # Initial scope only has 127.0.0.1 and localhost
+    call_init = ToolCall(id="call_sync_01", name="dns_lookup", arguments={"domain": "corp-target.net"})
+    res_init = await agent.gateway.execute(call_init, agent.registry.get("dns_lookup"))
+    assert res_init.is_error
+    assert "Scope Violation" in res_init.output
+
+    # Configure scope during active session
+    configure_scope(targets=["corp-target.net", "127.0.0.1"], assessment_name="Corp Audit")
+
+    # The existing agent instance must now immediately allow corp-target.net
+    assert agent.gateway.scope_manager.config.assessment_name == "Corp Audit"
+    assert "corp-target.net" in agent.gateway.scope_manager.config.targets
+
+
+def test_operator_authorization_rejects_arbitrary_tokens():
+    """Verify arbitrary authorization tokens cannot expand scope autonomously."""
+    from loki.security.context import AssessmentSecurityContext
+    from loki.tools.security_tools import authorize_target
+
+    AssessmentSecurityContext.reset_default()
+
+    # Pass arbitrary token
+    res = authorize_target("evil-unauthorized-host.org", authorization_token="any_random_token_123")
+    assert "Authorization Denied" in res
+    assert "Autonomous self-authorization by the model is disabled" in res

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Tool Registry for managing and invoking tools in Loki 2.0.
 All executions strictly route through the ExecutionGateway.

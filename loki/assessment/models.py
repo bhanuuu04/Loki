@@ -39,6 +39,12 @@ class FindingLifecycle(str, Enum):
     CLOSED = "closed"
 
 
+class FindingSource(str, Enum):
+    MODEL_HYPOTHESIS = "model_hypothesis"
+    TOOL_CONFIRMED = "tool_confirmed"
+    OPERATOR_VERIFIED = "operator_verified"
+
+
 class ReproductionRecord(BaseModel):
     """Structured proof-of-concept and reproduction trail."""
     reproduction_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -77,6 +83,8 @@ class SecurityFinding(BaseModel):
     severity: SeverityLevel = SeverityLevel.INFORMATIONAL
     confidence: ConfidenceLevel = ConfidenceLevel.POTENTIAL
     lifecycle: FindingLifecycle = FindingLifecycle.DISCOVERED
+    source: FindingSource = FindingSource.MODEL_HYPOTHESIS
+    evidence_provenance: Optional[str] = None
     evidence: str = ""
     evidence_hash: Optional[str] = None
     reproduction: Optional[ReproductionRecord] = None

@@ -1,43 +1,35 @@
 """
 Built-in Python execution tool for running scripts, calculations, and analysis.
-Executes in an isolated subprocess to prevent CLI stdout collision and hangs.
+Uses IsolatedExecutionEngine for real Docker or restricted subprocess (-I, sanitized env,
+isolated workspace, process-tree termination) sandboxing.
 """
 
-import subprocess
-import sys
-import re
-from loki.tools.base import tool
+from loki.tools.base import tool, ToolCapability
+from loki.executor.isolation import IsolatedExecutionEngine
 
 
-@tool(name="python_exec", description="Execute Python code in an isolated subprocess and capture stdout, stderr, and results.")
+@tool(
+    name="python_exec",
+    description="Execute Python code in an isolated sandbox (Docker or restricted -I subprocess) and capture stdout, stderr, and results.",
+    capabilities=[ToolCapability.SYSTEM, ToolCapability.PYTHON],
+)
 def python_exec(code: str, timeout_seconds: int = 15) -> str:
-    """Execute Python code in a dedicated subprocess."""
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            timeout=float(timeout_seconds),
-        )
-        stdout = proc.stdout.strip()
-        stderr = proc.stderr.strip()
+    """Execute Python code in an isolated sandbox."""
+    result = IsolatedExecutionEngine.execute_python_sync(
+        code=code,
+        timeout_seconds=float(timeout_seconds),
+    )
 
-        # Strip any stray terminal escape codes
-        stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", stdout)
-        stderr = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", stderr)
+    parts = []
+    if result.stdout.strip():
+        parts.append(f"Output:\n{result.stdout.strip()}")
+    if result.stderr.strip():
+        parts.append(f"Errors:\n{result.stderr.strip()}")
+    if result.timed_out:
+        parts.append(f"Python execution timed out after {timeout_seconds} seconds.")
+    elif result.exit_code != 0 and not result.stderr.strip():
+        parts.append(f"Process exited with code: {result.exit_code}")
 
-        parts = []
-        if stdout:
-            parts.append(f"Output:\n{stdout}")
-        if stderr:
-            parts.append(f"Errors:\n{stderr}")
-        if proc.returncode != 0 and not stderr:
-            parts.append(f"Process exited with code: {proc.returncode}")
-
-        if not parts:
-            return "Code executed successfully with no output."
-        return "\n".join(parts)
-    except subprocess.TimeoutExpired:
-        return f"Python execution timed out after {timeout_seconds} seconds."
-    except Exception as e:
-        return f"Python execution error: {type(e).__name__}: {str(e)}"
+    if not parts:
+        return "Code executed successfully with no output."
+    return "\n".join(parts)

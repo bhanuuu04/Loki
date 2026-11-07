@@ -1,13 +1,25 @@
 """
 Base tool interfaces and decorators for Loki.
+Supports capability metadata tagging for security enforcement.
 """
 
-from typing import Any, Callable, Dict, List, Optional, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, Set, Union, get_type_hints
+from enum import Enum
 import inspect
 import functools
 import time
 from pydantic import BaseModel
 from loki.types import ToolResult
+
+
+class ToolCapability(str, Enum):
+    NETWORK = "network"
+    TARGET_INTERACTION = "target_interaction"
+    SYSTEM = "system"
+    SHELL = "shell"
+    PYTHON = "python"
+    FILESYSTEM = "filesystem"
+    UTILITY = "utility"
 
 
 def _py_type_to_json_schema(py_type: Any) -> Dict[str, Any]:
@@ -36,17 +48,27 @@ class Tool:
         description: str,
         func: Callable[..., Any],
         parameters_schema: Optional[Dict[str, Any]] = None,
+        capabilities: Optional[List[Union[ToolCapability, str]]] = None,
     ):
         self.name = name
         self.description = description
         self.func = func
         self.is_async = inspect.iscoroutinefunction(func)
         self.parameters_schema = parameters_schema or self._generate_schema_from_func(func)
+        self.capabilities: Set[str] = {
+            c.value if isinstance(c, ToolCapability) else str(c)
+            for c in (capabilities or [])
+        }
 
     @property
     def parameters(self) -> Dict[str, Any]:
         """Convenience property for accessing parameter schema."""
         return self.parameters_schema
+
+    def has_capability(self, cap: Union[ToolCapability, str]) -> bool:
+        """Check if tool possesses specified security or operational capability."""
+        val = cap.value if isinstance(cap, ToolCapability) else str(cap)
+        return val in self.capabilities
 
     def _generate_schema_from_func(self, fn: Callable[..., Any]) -> Dict[str, Any]:
         """Automatically derive JSON Schema parameters from Python type hints."""
@@ -119,18 +141,22 @@ class Tool:
             )
 
 
-def tool(name: Optional[str] = None, description: Optional[str] = None):
+def tool(
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    capabilities: Optional[List[Union[ToolCapability, str]]] = None,
+):
     """
     Decorator to convert a standard Python function into a Loki Tool.
-    
-    Usage:
-        @tool(name="calculator", description="Performs basic arithmetic")
-        def calculate(expression: str) -> str:
-            return str(eval(expression))
     """
     def decorator(fn: Callable[..., Any]) -> Tool:
         tool_name = name or fn.__name__
         tool_desc = description or (fn.__doc__ or f"Tool {tool_name}").strip()
-        return Tool(name=tool_name, description=tool_desc, func=fn)
+        return Tool(
+            name=tool_name,
+            description=tool_desc,
+            func=fn,
+            capabilities=capabilities,
+        )
 
     return decorator

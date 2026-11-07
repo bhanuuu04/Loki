@@ -17,6 +17,7 @@ from loki.tools.builtins import ALL_BUILTIN_TOOLS
 from loki.tools.security_tools import ALL_SECURITY_TOOLS
 from loki.tools.registry import ToolRegistry
 from loki.security.gateway import ExecutionGateway
+from loki.security.context import AssessmentSecurityContext
 from loki.types import (
     AgentEvent,
     AgentStep,
@@ -72,7 +73,8 @@ class LokiAgent:
         self.temperature = temperature
         self.memory_store = memory_store or MemoryStore()
 
-        self.gateway = gateway or ExecutionGateway.get_default()
+        self.security_context = AssessmentSecurityContext.get_default()
+        self.gateway = gateway or self.security_context.gateway
         self.registry = ToolRegistry(gateway=self.gateway)
         if include_builtins:
             for bt in ALL_BUILTIN_TOOLS:

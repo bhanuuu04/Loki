@@ -129,3 +129,78 @@ def test_coverage_tracking():
 
     orch._update_coverage()
     assert plan.coverage.coverage_percentage > 0.0
+
+
+@pytest.mark.asyncio
+async def test_durable_assessment_recovery_sqlite(tmp_path):
+    """Test durable assessment recovery after simulating a full process restart."""
+    from loki.assessment.db import DatabaseManager
+    from loki.assessment.models import AssessmentSession
+    from loki.security.scope_manager import ScopeConfig
+
+    db_path = tmp_path / "durable_test.db"
+    db = DatabaseManager(db_path=str(db_path))
+
+    session_id = "sess_durable_recov_01"
+    session = AssessmentSession(
+        session_id=session_id,
+        assessment_name="Durable Audit Session",
+        scope=ScopeConfig(assessment_name="Durable Audit Session", targets=["durable.internal"]),
+    )
+    db.save_assessment(session)
+
+    # Create orchestrator with database manager
+    orch = AssessmentOrchestrator.create_standard_plan(
+        session_id=session_id,
+        assessment_name="Durable Audit",
+        target="durable.internal",
+        db_manager=db,
+    )
+
+    class MockToolGateway:
+        async def execute(self, *args, **kwargs):
+            return ToolResult(
+                call_id="call_mock_durable",
+                tool_name="dns_lookup",
+                output="192.168.1.100 Host active",
+                is_error=False,
+                execution_time_ms=12.5,
+            )
+
+    orch.gateway = MockToolGateway()
+
+    # Execute first task
+    next_tasks = orch.get_next_tasks()
+    t1 = next_tasks[0]
+    await orch.execute_task(t1)
+
+    assert t1.status == TaskStatus.COMPLETED
+    assert len(t1.evidence_ids) >= 1
+    real_evidence_id = t1.evidence_ids[0]
+
+    # Verify evidence was actually indexed into the SQLite evidence table
+    with db._get_connection() as conn:
+        ev_row = conn.execute("SELECT * FROM evidence WHERE evidence_id = ?", (real_evidence_id,)).fetchone()
+        assert ev_row is not None
+        assert ev_row["tool_name"] == "dns_lookup"
+        assert "192.168.1.100" in ev_row["raw_output"]
+
+    # Save checkpoint to SQLite
+    orch.checkpoint()
+
+    # -------------------------------------------------------------
+    # SIMULATE PROCESS RESTART: Destroy in-memory object & reload from DB
+    # -------------------------------------------------------------
+    del orch
+
+    restored_orch = AssessmentOrchestrator.load_from_db(
+        session_id=session_id,
+        db_manager=db,
+    )
+
+    assert restored_orch is not None
+    assert restored_orch.plan is not None
+    assert restored_orch.plan.is_resumed is True
+    assert restored_orch.plan.session_id == session_id
+    assert restored_orch.plan.tasks[t1.task_id].status == TaskStatus.COMPLETED
+    assert restored_orch.plan.tasks[t1.task_id].evidence_ids[0] == real_evidence_id

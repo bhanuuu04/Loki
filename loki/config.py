@@ -51,6 +51,9 @@ class LokiConfig(BaseModel):
     enable_shell_execution: bool = Field(
         default_factory=lambda: os.getenv("LOKI_ENABLE_SHELL", "true").lower() == "true"
     )
+    operator_token: Optional[str] = Field(
+        default_factory=lambda: os.getenv("LOKI_OPERATOR_TOKEN")
+    )
 
 
 # Global default configuration instance

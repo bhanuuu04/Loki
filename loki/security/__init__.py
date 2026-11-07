@@ -2,6 +2,7 @@ from loki.security.scope_manager import ScopeManager, ScopeConfig, ScopeTarget, 
 from loki.security.policy_engine import PolicyEngine, ExecutionMode, CommandRisk
 from loki.security.audit_logger import AuditLogger, AuditEntry
 from loki.security.gateway import ExecutionGateway
+from loki.security.context import AssessmentSecurityContext
 
 __all__ = [
     "ScopeManager",
@@ -14,4 +15,5 @@ __all__ = [
     "AuditLogger",
     "AuditEntry",
     "ExecutionGateway",
+    "AssessmentSecurityContext",
 ]

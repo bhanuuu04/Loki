@@ -6,14 +6,18 @@ Keeps deterministic execution state separate from LLM reasoning.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import asyncio
+import json
 import time
 import uuid
 from pydantic import BaseModel, Field
 
 from loki.types import ToolCall, ToolResult
 from loki.security.gateway import ExecutionGateway
+
+if TYPE_CHECKING:
+    from loki.assessment.db import DatabaseManager
 
 
 class AssessmentPhase(str, Enum):
@@ -100,9 +104,11 @@ class AssessmentOrchestrator:
         self,
         plan: Optional[AssessmentPlan] = None,
         gateway: Optional[ExecutionGateway] = None,
+        db_manager: Optional[Any] = None,
     ):
         self.plan = plan
         self.gateway = gateway or ExecutionGateway.get_default()
+        self.db = db_manager
         self._checkpoints: List[Dict[str, Any]] = []
 
     @classmethod
@@ -112,6 +118,7 @@ class AssessmentOrchestrator:
         assessment_name: str,
         target: str,
         time_budget_seconds: float = 1800.0,
+        db_manager: Optional[Any] = None,
     ) -> "AssessmentOrchestrator":
         """Factory creating a standard assessment DAG across all 4 phases."""
         plan_id = str(uuid.uuid4())
@@ -179,7 +186,27 @@ class AssessmentOrchestrator:
             plan.tasks[t.task_id] = t
 
         plan.coverage.targets_total = 1
-        return cls(plan=plan)
+        return cls(plan=plan, db_manager=db_manager)
+
+    @classmethod
+    def load_from_db(
+        cls,
+        session_id: str,
+        db_manager: Any,
+        gateway: Optional[ExecutionGateway] = None,
+    ) -> Optional["AssessmentOrchestrator"]:
+        """
+        Durable recovery after simulated or real process restart.
+        Loads latest checkpoint from SQLite DatabaseManager.
+        """
+        plan_json = db_manager.load_latest_checkpoint(session_id)
+        if not plan_json:
+            return None
+
+        plan_data = json.loads(plan_json)
+        plan = AssessmentPlan(**plan_data)
+        plan.is_resumed = True
+        return cls(plan=plan, gateway=gateway, db_manager=db_manager)
 
     def get_next_tasks(self) -> List[AssessmentTask]:
         """Returns all executable tasks whose dependencies are satisfied and are PENDING."""
@@ -214,11 +241,26 @@ class AssessmentOrchestrator:
         )
 
     def checkpoint(self) -> Dict[str, Any]:
-        """Create a point-in-time snapshot of the assessment state."""
+        """Create a point-in-time snapshot of the assessment state and persist to DB if configured."""
         if not self.plan:
             return {}
         data = self.plan.model_dump()
         self._checkpoints.append(data)
+
+        # Durable SQLite persistence
+        if self.db:
+            try:
+                ckpt_id = str(uuid.uuid4())
+                plan_json = self.plan.model_dump_json()
+                self.db.save_checkpoint(
+                    checkpoint_id=ckpt_id,
+                    plan_id=self.plan.plan_id,
+                    session_id=self.plan.session_id,
+                    plan_json=plan_json,
+                )
+            except Exception:
+                pass
+
         return data
 
     def restore_checkpoint(self, checkpoint_data: Dict[str, Any]) -> None:
@@ -281,7 +323,22 @@ class AssessmentOrchestrator:
             else:
                 task.status = TaskStatus.COMPLETED
                 task.result_summary = str(res.output)[:500]
-                task.evidence_ids.append(call_id)
+
+                # Index real evidence in durable database
+                ev_id = call_id
+                if self.db and self.plan:
+                    try:
+                        ev_id = self.db.index_evidence(
+                            session_id=self.plan.session_id,
+                            tool_name=task.tool_name,
+                            raw_output=str(res.output),
+                            task_id=task.task_id,
+                            command_args=[f"{k}={v}" for k, v in task.tool_args.items()],
+                            metadata={"call_id": call_id, "duration_ms": res.execution_time_ms},
+                        )
+                    except Exception:
+                        ev_id = call_id
+                task.evidence_ids.append(ev_id)
 
         except asyncio.TimeoutError:
             if task.retry_count < task.max_retries:

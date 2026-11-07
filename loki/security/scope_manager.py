@@ -61,6 +61,14 @@ METADATA_IPS = [
     ipaddress.ip_network("fd00::/8"),         # IPv6 Unique Local Address
 ]
 
+METADATA_HOSTS = {
+    "metadata.google.internal",
+    "metadata.google.internal.",
+    "instance-data",
+    "metadata",
+    "169.254.169.254",
+}
+
 LOOPBACK_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("::1/128"),
@@ -309,6 +317,10 @@ class ScopeManager:
         # Parse target if it is an IP address
         target_ip_net = self._parse_ip_or_network(host)
         target_ip = target_ip_net.network_address if target_ip_net else None
+
+        # Check cloud metadata hostnames directly
+        if host in METADATA_HOSTS or host.endswith(".metadata.google.internal"):
+            return False, f"Target '{host}' is a forbidden cloud-metadata endpoint (SSRF protection)."
 
         # -------------------------------------------------------------
         # STEP 1: EXCLUSION PRECEDENCE (Strictly overrides all inclusions)

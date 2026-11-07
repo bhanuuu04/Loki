@@ -1,6 +1,7 @@
 """
 Agent Tools for Cybersecurity Research and Auditing.
-Binds together ScopeManager, PolicyEngine, ToolRegistry, and AssessmentStore.
+Binds together ScopeManager, PolicyEngine, ToolRegistry, and AssessmentStore
+under a single shared AssessmentSecurityContext.
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -9,10 +10,11 @@ import socket
 import asyncio
 import re
 
-from loki.tools.base import tool
+from loki.tools.base import tool, ToolCapability
 from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
 from loki.security.gateway import ExecutionGateway
+from loki.security.context import AssessmentSecurityContext
 from loki.knowledge.cwe_database import lookup_cwe
 from loki.knowledge.owasp_knowledge import lookup_owasp
 from loki.knowledge.tool_registry.catalog import SecurityToolCatalog
@@ -25,43 +27,60 @@ from loki.assessment.models import (
     SeverityLevel,
     ConfidenceLevel,
 )
+from loki.config import settings
 
-# Global shared context singletons
-scope_mgr = ScopeManager(
-    ScopeConfig(
-        assessment_name="Loki Assessment Session",
-        targets=["127.0.0.1", "localhost"],
-        allow_subdomains=True,
-    )
-)
-policy_engine = PolicyEngine(scope_manager=scope_mgr)
+
+# Dynamic proxies ensuring calls always reflect the shared AssessmentSecurityContext
+class _ScopeManagerProxy:
+    def __getattr__(self, item: str) -> Any:
+        return getattr(AssessmentSecurityContext.get_default().scope_manager, item)
+
+
+class _PolicyEngineProxy:
+    def __getattr__(self, item: str) -> Any:
+        return getattr(AssessmentSecurityContext.get_default().policy_engine, item)
+
+
+class _AssessmentStoreProxy:
+    def __getattr__(self, item: str) -> Any:
+        return getattr(AssessmentSecurityContext.get_default().assessment_store, item)
+
+
+scope_mgr = _ScopeManagerProxy()
+policy_engine = _PolicyEngineProxy()
+assessment_store = _AssessmentStoreProxy()
 tool_catalog = SecurityToolCatalog()
 process_executor = SecureProcessExecutor()
-assessment_store = AssessmentStore()
 
 
-@tool(name="authorize_target", description="Check or verify authorization for a target under current assessment scope.")
+@tool(
+    name="authorize_target",
+    description="Check or verify authorization for a target under current assessment scope.",
+    capabilities=[ToolCapability.UTILITY],
+)
 def authorize_target(target: str, authorization_token: Optional[str] = None) -> str:
     """
-    Verify or explicitly authorize a target domain or IP.
+    Verify if a target domain or IP is within the authorized assessment scope.
     Autonomous self-authorization by LLM reasoning is blocked to enforce scope correctness.
     """
-    cleaned = scope_mgr.normalize_target(target)
+    ctx = AssessmentSecurityContext.get_default()
+    cleaned = ctx.scope_manager.normalize_target(target)
     if not cleaned:
         return "Error: Target identifier cannot be empty or invalid."
 
-    in_scope, reason = scope_mgr.is_in_scope(cleaned)
+    in_scope, reason = ctx.scope_manager.is_in_scope(cleaned)
     if in_scope:
         return f"Target '{cleaned}' is verified and within authorized assessment scope ({reason})."
 
-    # Require explicit operator authorization token
-    if authorization_token and authorization_token.strip():
-        scope_mgr.update_targets(
+    # Require explicit, verified operator token (not any arbitrary non-empty string)
+    expected_token = settings.operator_token
+    if expected_token and authorization_token and authorization_token.strip() == expected_token:
+        ctx.scope_manager.update_targets(
             add_targets=[cleaned],
-            author="operator_token",
-            reason=f"Explicit authorization via token for {cleaned}",
+            author="verified_operator",
+            reason=f"Explicit operator authorization verified for {cleaned}",
         )
-        return f"Target '{cleaned}' has been explicitly authorized under scope version {scope_mgr.config.version}."
+        return f"Target '{cleaned}' has been explicitly authorized under scope version {ctx.scope_manager.config.version}."
 
     return (
         f"Authorization Denied: Target '{cleaned}' is not authorized. "
@@ -70,14 +89,22 @@ def authorize_target(target: str, authorization_token: Optional[str] = None) -> 
     )
 
 
-@tool(name="configure_assessment_scope", description="Explicitly initialize or update authorized assessment scope and targets.")
+@tool(
+    name="configure_assessment_scope",
+    description="Explicitly initialize or update authorized assessment scope and targets.",
+    capabilities=[ToolCapability.UTILITY],
+)
 def configure_scope(
     targets: Union[List[str], str],
     assessment_name: Optional[str] = None,
     excluded_targets: Optional[Union[List[str], str]] = None,
     execution_mode: str = "safe",
+    operator_name: str = "operator",
+    reason: Optional[str] = None,
 ) -> str:
     """Set the assessment scope and boundaries with versioning and audit tracking."""
+    ctx = AssessmentSecurityContext.get_default()
+
     if isinstance(targets, str):
         if "," in targets:
             target_list = [t.strip() for t in targets.split(",") if t.strip()]
@@ -90,7 +117,7 @@ def configure_scope(
 
     cleaned_targets = []
     for t in target_list:
-        c = scope_mgr.normalize_target(t)
+        c = ctx.scope_manager.normalize_target(t)
         if c:
             cleaned_targets.append(c)
 
@@ -100,9 +127,9 @@ def configure_scope(
     clean_excluded = []
     if excluded_targets:
         if isinstance(excluded_targets, str):
-            clean_excluded = [scope_mgr.normalize_target(e.strip()) for e in excluded_targets.split(",") if e.strip()]
+            clean_excluded = [ctx.scope_manager.normalize_target(e.strip()) for e in excluded_targets.split(",") if e.strip()]
         elif isinstance(excluded_targets, (list, tuple)):
-            clean_excluded = [scope_mgr.normalize_target(str(e)) for e in excluded_targets if str(e).strip()]
+            clean_excluded = [ctx.scope_manager.normalize_target(str(e)) for e in excluded_targets if str(e).strip()]
 
     name = assessment_name or f"Assessment-{cleaned_targets[0]}"
 
@@ -116,34 +143,43 @@ def configure_scope(
         excluded_targets=clean_excluded,
         allow_subdomains=True,
     )
-    scope_mgr.set_config(config, author="operator_configure_scope", reason=f"Configured {name}")
-    policy_engine.set_mode(mode)
+    ctx.configure_scope(
+        config=config,
+        mode=mode,
+        author=operator_name,
+        reason=reason or f"Configured scope for {name}",
+    )
 
-    # Synchronize default ExecutionGateway
-    ExecutionGateway.set_default(ExecutionGateway(scope_manager=scope_mgr, policy_engine=policy_engine))
-    
-    # Initialize assessment session
+    # Initialize assessment session in store
     clean_sess_id = re.sub(r"[^a-zA-Z0-9_]", "_", name.lower())
     session_id = f"audit_{clean_sess_id}"
-    session = assessment_store.create_assessment(
+    session = ctx.assessment_store.create_assessment(
         session_id=session_id,
         name=name,
         scope=config,
     )
     session.execution_mode = mode
-    assessment_store.save_assessment(session)
+    ctx.assessment_store.save_assessment(session)
 
     return f"Scope successfully configured for '{name}'. Authorized Targets: {cleaned_targets}. Excluded: {clean_excluded}. Mode: {mode.value.upper()}."
 
 
-@tool(name="check_scope_authorization", description="Verify if a target host, IP, or URL is within the authorized assessment scope.")
+@tool(
+    name="check_scope_authorization",
+    description="Verify if a target host, IP, or URL is within the authorized assessment scope.",
+    capabilities=[ToolCapability.UTILITY],
+)
 def check_scope(target: str) -> str:
     """Check if target is authorized under scope."""
     allowed, reason = scope_mgr.is_in_scope(target)
     return f"Target: {target} | In Scope: {allowed} | Details: {reason}"
 
 
-@tool(name="search_security_tool_catalog", description="Search the Kali security tool registry by objective (e.g. 'port scan', 'ssl', 'cve', 'web').")
+@tool(
+    name="search_security_tool_catalog",
+    description="Search the Kali security tool registry by objective (e.g. 'port scan', 'ssl', 'cve', 'web').",
+    capabilities=[ToolCapability.UTILITY],
+)
 def search_tools(query: str) -> str:
     """Find relevant security tools from the registry."""
     matches = tool_catalog.search_by_objective(query)
@@ -159,7 +195,11 @@ def search_tools(query: str) -> str:
     return "\n\n".join(results)
 
 
-@tool(name="lookup_cwe_knowledge", description="Lookup official CWE definition, impact, and remediation steps (e.g., 'CWE-89' or 'CWE-79').")
+@tool(
+    name="lookup_cwe_knowledge",
+    description="Lookup official CWE definition, impact, and remediation steps (e.g., 'CWE-89' or 'CWE-79').",
+    capabilities=[ToolCapability.UTILITY],
+)
 def get_cwe(cwe_id: str) -> str:
     """Retrieve CWE details and remediation."""
     cwe = lookup_cwe(cwe_id)
@@ -174,7 +214,11 @@ def get_cwe(cwe_id: str) -> str:
     )
 
 
-@tool(name="lookup_owasp_guidelines", description="Retrieve OWASP Top 10 category description and prevention steps (e.g., 'A01', 'A03', 'Injection').")
+@tool(
+    name="lookup_owasp_guidelines",
+    description="Retrieve OWASP Top 10 category description and prevention steps (e.g., 'A01', 'A03', 'Injection').",
+    capabilities=[ToolCapability.UTILITY],
+)
 def get_owasp(category: str) -> str:
     """Retrieve OWASP Top 10 category."""
     cat = lookup_owasp(category)
@@ -189,10 +233,13 @@ def get_owasp(category: str) -> str:
     )
 
 
-@tool(name="audit_http_security_headers", description="Audit HTTP security headers on an authorized web endpoint.")
+@tool(
+    name="audit_http_security_headers",
+    description="Audit HTTP security headers on an authorized web endpoint.",
+    capabilities=[ToolCapability.NETWORK, ToolCapability.TARGET_INTERACTION],
+)
 async def audit_headers(url: str) -> str:
     """Audit HTTP response security headers."""
-    # Scope check
     is_allowed, reason = scope_mgr.is_in_scope(url)
     if not is_allowed:
         return f"Authorization Error: {reason}"
@@ -223,7 +270,11 @@ async def audit_headers(url: str) -> str:
         return f"Header audit error: {type(e).__name__}: {str(e)}"
 
 
-@tool(name="record_security_finding", description="Record a validated vulnerability or configuration weakness into the assessment report.")
+@tool(
+    name="record_security_finding",
+    description="Record a validated vulnerability or configuration weakness into the assessment report.",
+    capabilities=[ToolCapability.UTILITY],
+)
 def record_finding(
     session_id: str,
     finding_id: str,
@@ -259,7 +310,11 @@ def record_finding(
     return f"Finding '{finding_id}: {title}' recorded in session '{session_id}'."
 
 
-@tool(name="generate_assessment_report", description="Export assessment report in Markdown, HTML, and JSON formats.")
+@tool(
+    name="generate_assessment_report",
+    description="Export assessment report in Markdown, HTML, and JSON formats.",
+    capabilities=[ToolCapability.UTILITY],
+)
 def generate_report(session_id: str) -> str:
     """Export security report."""
     from loki.reporting.generator import ReportGenerator
@@ -279,7 +334,11 @@ def generate_report(session_id: str) -> str:
     )
 
 
-@tool(name="enumerate_subdomains", description="Passively enumerate subdomains for an authorized target domain using Certificate Transparency and DNS reconnaissance.")
+@tool(
+    name="enumerate_subdomains",
+    description="Passively enumerate subdomains for an authorized target domain using Certificate Transparency and DNS reconnaissance.",
+    capabilities=[ToolCapability.NETWORK, ToolCapability.TARGET_INTERACTION],
+)
 async def enumerate_subdomains(domain: str) -> str:
     """Enumerate subdomains passively via Certificate Transparency and verify DNS."""
     domain = re.sub(r"^https?://", "", domain).split("/")[0].strip()
@@ -341,7 +400,11 @@ async def enumerate_subdomains(domain: str) -> str:
     return "\n".join(lines)
 
 
-@tool(name="dns_lookup", description="Query DNS record resolution (A records, hostname to IP) for a target domain or host.")
+@tool(
+    name="dns_lookup",
+    description="Query DNS record resolution (A records, hostname to IP) for a target domain or host.",
+    capabilities=[ToolCapability.NETWORK, ToolCapability.TARGET_INTERACTION],
+)
 async def dns_lookup(domain: str) -> str:
     """Resolve IP address for target domain."""
     domain = re.sub(r"^https?://", "", domain).split("/")[0].strip()

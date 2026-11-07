@@ -105,10 +105,10 @@ def test_dns_rebinding_and_cloud_metadata_protection():
     )
 
     # Directly targeting AWS/GCP/Azure link-local metadata IP
-    for meta_ip in ["169.254.169.254", "169.254.0.1", "fe80::1"]:
+    for meta_ip in ["169.254.169.254", "169.254.0.1", "fe80::1", "metadata.google.internal"]:
         allowed, reason = scope.is_in_scope(meta_ip)
         assert not allowed
-        assert "forbidden cloud-metadata" in reason or "excluded" in reason or "NOT in authorized scope" in reason
+        assert "cloud-metadata" in reason.lower() or "forbidden" in reason.lower() or "not in authorized scope" in reason.lower()
 
 
 def test_redirect_destination_validation():
