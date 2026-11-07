@@ -55,6 +55,9 @@ class LokiConfig(BaseModel):
     enable_shell_execution: bool = Field(
         default_factory=lambda: os.getenv("LOKI_ENABLE_SHELL", "true").lower() == "true"
     )
+    shell_docker_image: str = Field(
+        default_factory=lambda: os.getenv("LOKI_SHELL_DOCKER_IMAGE", "alpine:latest")
+    )
     operator_token: Optional[str] = Field(
         default_factory=lambda: os.getenv("LOKI_OPERATOR_TOKEN")
     )
