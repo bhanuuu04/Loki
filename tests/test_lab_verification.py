@@ -74,6 +74,8 @@ class _FakeStream:
 
 class _FakeClient:
     last_request = None
+    requests = []
+    responses = []
     response = None
 
     def __init__(self, **kwargs):
@@ -86,13 +88,19 @@ class _FakeClient:
         return False
 
     def stream(self, method, url, headers=None):
-        self.__class__.last_request = {
+        request = {
             "method": method,
             "url": url,
             "headers": headers or {},
             "options": self.options,
         }
-        return _FakeStream(self.__class__.response)
+        self.__class__.last_request = request
+        self.__class__.requests.append(request)
+        if self.__class__.responses:
+            response = self.__class__.responses.pop(0)
+        else:
+            response = self.__class__.response
+        return _FakeStream(response)
 
 
 @pytest.fixture
@@ -111,6 +119,8 @@ def lab_context(tmp_path, monkeypatch):
     store.create_assessment(ctx.active_assessment_id, "Disposable Lab", config)
     AssessmentSecurityContext.reset_default(ctx)
     _FakeClient.last_request = None
+    _FakeClient.requests = []
+    _FakeClient.responses = []
     _FakeClient.response = None
     monkeypatch.setattr(security_tools.httpx, "AsyncClient", _FakeClient)
     return ctx
@@ -119,17 +129,20 @@ def lab_context(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_nomercy_lab_probe_retrieves_only_seeded_fixture_and_records_finding(lab_context):
     marker = _marker()
-    _FakeClient.response = _FakeResponse(json.dumps({
-        "results": [
-            {
-                "id": "fixture-7",
-                "loki_canary": marker,
-                "record": "dummy-lab-data",
-                "password": "must-not-be-returned",
-                "email": "user@example.test",
-            }
-        ]
-    }).encode())
+    _FakeClient.responses = [
+        _FakeResponse(json.dumps({"results": [{"id": "ordinary-record"}]}).encode()),
+        _FakeResponse(json.dumps({
+            "results": [
+                {
+                    "id": "fixture-7",
+                    "loki_canary": marker,
+                    "record": "dummy-lab-data",
+                    "password": "must-not-be-returned",
+                    "email": "user@example.test",
+                }
+            ]
+        }).encode()),
+    ]
 
     result = await security_tools.verify_lab_data_access(
         url="https://lab.example.test/api/records?id=1",
@@ -138,17 +151,20 @@ async def test_nomercy_lab_probe_retrieves_only_seeded_fixture_and_records_findi
         payload="' OR 1=1--",
     )
 
-    assert "VERIFIED — LAB DATA ACCESS CONFIRMED" in result
+    assert "INJECTION VERIFIED — SEEDED LAB DATA ACCESS CONFIRMED" in result
     assert "dummy-lab-data" in result
     assert "must-not-be-returned" not in result
     assert "user@example.test" not in result
 
-    request = _FakeClient.last_request
-    assert request["method"] == "GET"
-    assert "id=%27+OR+1%3D1--" in request["url"]
-    assert marker not in request["url"]
-    assert request["options"]["follow_redirects"] is False
-    assert request["options"]["trust_env"] is False
+    assert len(_FakeClient.requests) == 2
+    control_request, injected_request = _FakeClient.requests
+    assert control_request["method"] == "GET"
+    assert "id=" not in control_request["url"]
+    assert injected_request["method"] == "GET"
+    assert "id=%27+OR+1%3D1--" in injected_request["url"]
+    assert marker not in injected_request["url"]
+    assert injected_request["options"]["follow_redirects"] is False
+    assert injected_request["options"]["trust_env"] is False
 
     session = lab_context.assessment_store.load_assessment("lab_disposable")
     assert len(session.findings) == 1
@@ -211,3 +227,47 @@ async def test_lab_probe_rejects_canary_reflection_and_redirects(lab_context):
         canary_marker=marker,
     )
     assert "marker must not be present" in reflected.lower()
+
+
+@pytest.mark.asyncio
+async def test_payload_is_not_confirmed_when_canary_is_already_accessible_without_payload(lab_context):
+    marker = _marker()
+    fixture = {
+        "results": [{"id": "fixture-7", "loki_canary": marker, "record": "dummy-lab-data"}]
+    }
+    _FakeClient.responses = [
+        _FakeResponse(json.dumps(fixture).encode()),
+    ]
+
+    result = await security_tools.verify_lab_data_access(
+        url="https://lab.example.test/api/records?id=1",
+        canary_marker=marker,
+        parameter="id",
+        payload="' OR 1=1--",
+    )
+
+    assert "DATA ACCESS FOUND WITHOUT THE TEST PAYLOAD" in result
+    assert "INJECTION NOT VERIFIED" in result
+    assert len(_FakeClient.requests) == 1
+    session = lab_context.assessment_store.load_assessment("lab_disposable")
+    assert session.findings == []
+
+
+@pytest.mark.asyncio
+async def test_direct_canary_fetch_does_not_claim_an_exploit(lab_context):
+    marker = _marker()
+    _FakeClient.responses = [
+        _FakeResponse(json.dumps({
+            "results": [{"id": "fixture-7", "loki_canary": marker, "record": "dummy-lab-data"}]
+        }).encode()),
+    ]
+
+    result = await security_tools.verify_lab_data_access(
+        url="https://lab.example.test/api/records",
+        canary_marker=marker,
+    )
+
+    assert "DATA ACCESS CONFIRMED" in result
+    assert "EXPLOITABILITY NOT VERIFIED" in result
+    session = lab_context.assessment_store.load_assessment("lab_disposable")
+    assert session.findings == []
