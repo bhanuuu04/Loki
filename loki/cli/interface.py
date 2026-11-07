@@ -24,6 +24,7 @@ from loki.runtime.agent import LokiAgent
 from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
 from loki.tools.security_tools import scope_mgr, kali_tool_index
+from loki.knowledge.tool_registry.performance_memory import tool_performance_memory, classify_task
 from loki.providers.factory import get_provider
 from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file
@@ -270,6 +271,8 @@ class LokiConversationalCLI:
             table.add_row("/tool search <query>", "Search the synced Kali Linux tool catalogue")
             table.add_row("/tool info <name>", "Inspect a Kali tool, package, or executable alias")
             table.add_row("/tool installed", "List Kali tools detected on the Loki host")
+            table.add_row("/tool performance [task]", "View learned tool effectiveness and priorities")
+            table.add_row("/tool reset-memory", "Clear learned tool priorities after confirmation")
             table.add_row("/tool sync", "Sync the official Kali tools catalogue")
             table.add_row("/status", "Show active session telemetry & token usage")
             table.add_row("/history", "View conversation history")
@@ -513,6 +516,26 @@ class LokiConversationalCLI:
                         )
                     console.print("[dim]Showing up to 20 detected entries. This checks host PATH, not the Docker image.[/dim]")
 
+            elif action == "performance":
+                task_type = classify_task(value) if value else None
+                console.print(
+                    Panel(
+                        tool_performance_memory.summary(task_type),
+                        title=(f"Tool Effectiveness Memory — {task_type}" if task_type else "Tool Effectiveness Memory"),
+                        border_style="cyan",
+                    )
+                )
+
+            elif action == "reset-memory":
+                if Confirm.ask(
+                    "Clear Loki's local tool-effectiveness memory? This does not delete chat history or findings",
+                    default=False,
+                ):
+                    tool_performance_memory.clear()
+                    console.print("[bold green]✔ Tool-effectiveness memory cleared.[/bold green]")
+                else:
+                    console.print("[dim]Memory was not changed.[/dim]")
+
             elif action == "info":
                 if not value:
                     console.print("[yellow]Usage: /tool info <tool, package, or executable>[/yellow]")
@@ -538,7 +561,9 @@ class LokiConversationalCLI:
                     "  /tool sync\n"
                     "  /tool search <query>\n"
                     "  /tool info <name>\n"
-                    "  /tool installed"
+                    "  /tool installed\n"
+                    "  /tool performance [task]\n"
+                    "  /tool reset-memory"
                 )
 
         elif sub == "/status":

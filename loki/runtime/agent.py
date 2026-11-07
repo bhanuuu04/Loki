@@ -18,6 +18,14 @@ from loki.tools.security_tools import ALL_SECURITY_TOOLS
 from loki.tools.registry import ToolRegistry
 from loki.security.gateway import ExecutionGateway
 from loki.security.context import AssessmentSecurityContext
+from loki.knowledge.tool_registry.performance_memory import (
+    ToolPerformanceMemory,
+    classify_task,
+    classify_tool_outcome,
+    effective_tool_name,
+    is_investigation_request,
+    tool_performance_memory,
+)
 from loki.types import (
     AgentEvent,
     AgentStep,
@@ -44,7 +52,13 @@ Operational Rules:
 7. Tool selection and calling: Prefer the smallest relevant built-in tool. For Kali command work, discover candidates, inspect one candidate, verify the target with check_scope_authorization when applicable, then make one minimal tool call and inspect its exit code and output before continuing. Do not send many speculative commands in parallel. If a command is missing, search for an alternative rather than repeatedly retrying.
 8. Network and execution boundaries: The generic run_command shell runs inside the configured Docker image with networking disabled. Do not use it for live remote scanning or claim that it reached a target. Use a dedicated network-capable tool that enforces active scope, or explain when the requested tool is not yet supported by a scoped network adapter. Never weaken sandbox networking or scope controls to make a tool work.
 9. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
-10. Reporting: Present findings systematically in clear GitHub-flavored Markdown. Group results with bullet points or tables, and provide clear remediation guidance.
+10. Goal-driven investigations: Treat requests to find, identify, locate, fingerprint, or enumerate something as an objective, not a one-tool task. A failed tool is one observation, not a reason to stop. When the objective is unresolved, try a materially different authorized method, avoid repeating the same failed method without a new hypothesis, and use the remaining run budget. Keep a short method ledger with the tool, what it established, and what it did not establish. Distinguish a method that returned no data from a method that was blocked by policy.
+11. Learned tool effectiveness: Use the task-specific effectiveness memory in the live system context. Rank historically successful tools earlier for similar objectives, but treat the score as a hint rather than proof. Update the memory from every tool result. A useful result should increase priority; repeated no-result/error outcomes should lower priority. New tools start neutral. Never store or expose raw tool output, target names, prompts, or credentials in the learning memory.
+12. Origin IP and CDN handling: For an origin-IP request, distinguish an ordinary DNS answer and a CDN edge IP from an independently verified origin address. Use only in-scope DNS observations and owner-provided DNS-zone, CDN, hosting, or cloud asset inventory. If a CDN is in front, do not attempt to bypass it, mine leaked origin databases, exploit misconfigurations, brute-force virtual hosts, or probe candidate origin IPs. If owner-controlled inventory is not available, say the origin is not verified; continue only with safe adjacent facts such as CDN/provider identification, public DNS records, certificate names, and in-scope technology metadata.
+13. Additional useful information: Prioritize the exact question first. Once it is answered or no further safe method exists, include concise relevant side findings (for example DNS/NS/MX/TXT observations, certificate names, server headers, technology fingerprints, and in-scope subdomains). Label observations, inferences, and verified facts separately.
+14. Network and execution boundaries: The generic run_command shell runs inside the configured Docker image with networking disabled. Do not use it for live remote scanning or claim that it reached a target. Use a dedicated network-capable tool that enforces active scope, or explain when the requested tool is not yet supported by a scoped network adapter. Never weaken sandbox networking or scope controls to make a tool work.
+15. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
+16. Reporting: Present findings systematically in clear GitHub-flavored Markdown. Group results with bullet points or tables, and provide clear remediation guidance.
 """
 
 
@@ -65,6 +79,8 @@ class LokiAgent:
         gateway: Optional[ExecutionGateway] = None,
         include_builtins: bool = True,
         include_security_tools: bool = True,
+        tool_learning: Optional[ToolPerformanceMemory] = None,
+        max_adaptive_continuations: Optional[int] = None,
     ):
         if isinstance(provider, str):
             self.provider = get_provider(provider)
@@ -77,6 +93,9 @@ class LokiAgent:
         self.max_steps = max_steps
         self.temperature = temperature
         self.memory_store = memory_store or MemoryStore()
+        self.tool_learning = tool_learning or tool_performance_memory
+        continuation_budget = settings.max_adaptive_continuations if max_adaptive_continuations is None else max_adaptive_continuations
+        self.max_adaptive_continuations = max(0, min(int(continuation_budget), 12))
 
         self.security_context = AssessmentSecurityContext.get_default()
         self._follow_default_security_context = gateway is None
@@ -114,7 +133,7 @@ class LokiAgent:
         self.gateway = current_context.gateway
         self.registry.set_gateway(self.gateway)
 
-    def _build_runtime_system_prompt(self) -> str:
+    def _build_runtime_system_prompt(self, task_type: str = "general") -> str:
         """
         Add an authoritative snapshot of the live scope and policy to the prompt.
 
@@ -144,7 +163,74 @@ class LokiAgent:
             "target list from conversation history or claim that a listed target is out of "
             "scope based on stale context. Prefer the built-in authorization/DNS tools when "
             "checking a target. The Execution Gateway remains the final authority and may "
-            "still reject an address that resolves into a forbidden or excluded network.\n"
+            "still reject an address that resolves into a forbidden or excluded network.\n\n"
+            f"CURRENT OBJECTIVE CATEGORY: {task_type}\n"
+            "LEARNED TOOL EFFECTIVENESS (privacy-preserving local history):\n"
+            f"{self.tool_learning.format_guidance(task_type)}\n\n"
+            "When the objective is unresolved, use a different source/method rather than stopping after one failed lookup. "
+            "Do not repeat failed methods without a new hypothesis. Use learned rankings to choose the next candidate, "
+            "but verify every result and remain within scope.\n"
+        )
+
+    @staticmethod
+    def _looks_unresolved(task_type: str, response: str) -> bool:
+        value = (response or "").lower()
+        blocked = (
+            "scope violation", "out of scope", "authorization denied",
+            "authorization error", "not authorized", "permission denied",
+            "policy violation",
+        )
+        if any(marker in value for marker in blocked):
+            return False
+
+        terminal = (
+            "all safe methods exhausted", "no further safe method",
+            "no more authorized methods", "remaining methods are blocked",
+            "no additional supported tools",
+        )
+        if any(marker in value for marker in terminal):
+            return False
+
+        unresolved = (
+            "unable to", "cannot find", "can't find", "could not find",
+            "couldn't find", "can't be found", "could not resolve", "unable to resolve",
+            "no results", "no result", "not found", "not identified",
+            "cannot determine", "can't determine", "unknown", "inconclusive",
+            "origin remains unknown", "origin could not be confirmed",
+            "does not reveal the origin", "did not reveal the origin",
+            "edge address only", "not enough evidence", "not verified",
+            "couldn't identify",
+        )
+        if any(marker in value for marker in unresolved):
+            return True
+
+        if task_type == "origin_ip_verification":
+            mentions_cdn = any(
+                marker in value for marker in ("cdn", "cloudflare", "cloudfront", "fastly", "akamai")
+            )
+            verified_origin = any(
+                marker in value for marker in ("owner inventory", "authoritative origin record", "origin ip verified")
+            )
+            return mentions_cdn and not verified_origin
+        return False
+
+    @staticmethod
+    def _continuation_message(
+        task_type: str,
+        outcomes: List[tuple[str, str]],
+        continuation_number: int,
+        max_continuations: int,
+    ) -> str:
+        ledger = ", ".join(f"{name}={outcome}" for name, outcome in outcomes[-20:]) or "No tools called yet"
+        return (
+            f"INVESTIGATION CONTINUATION {continuation_number}/{max_continuations}. "
+            f"The primary objective ({task_type}) is still unresolved. "
+            f"Methods tried so far: {ledger}. "
+            "Continue with a materially different, authorized method if one is available. "
+            "Do not repeat a no-result/error method without a new hypothesis; consult the updated "
+            "tool-effectiveness memory and prioritize methods with prior useful results. "
+            "Separate the primary objective from additional useful observations. "
+            "If every remaining method is blocked or unsafe, stop and explain the limitation honestly."
         )
 
     def add_listener(self, listener: Callable[[AgentEvent], Any]) -> None:
@@ -182,9 +268,12 @@ class LokiAgent:
             {"prompt": prompt, "model": self.provider.model, "session_id": session_id},
         )
 
-        # Resolve the current shared security state before loading or creating chat history.
+        # Resolve shared authorization and task-specific learning before loading history.
         self._refresh_security_context()
-        runtime_system_prompt = self._build_runtime_system_prompt()
+        task_type = classify_task(prompt)
+        runtime_system_prompt = self._build_runtime_system_prompt(task_type)
+        tool_outcomes: List[tuple[str, str]] = []
+        continuation_count = 0
 
         # Initialize or load context
         if context is None:
@@ -265,12 +354,34 @@ class LokiAgent:
                             },
                         )
 
-                        # Execute tool
+                        # Execute tool through the existing policy/scope gateway.
                         t_res = await self.registry.execute_call(tc)
                         tool_results.append(t_res)
 
-                        # Add tool result to context history
+                        # Persist only task category, tool name, and a coarse outcome label.
+                        learning_name = effective_tool_name(tc.name, tc.arguments)
+                        outcome = classify_tool_outcome(
+                            t_res.output,
+                            is_error=t_res.is_error,
+                            metadata=t_res.metadata,
+                            task_type=task_type,
+                        )
+                        if tc.name in {
+                            "discover_kali_tools", "get_kali_tool_details",
+                            "check_kali_tool_availability", "search_security_tool_catalog",
+                            "check_scope_authorization",
+                        } and outcome == "success":
+                            outcome = "partial"
+                        try:
+                            self.tool_learning.record(task_type, learning_name, outcome)
+                        except Exception:
+                            # Learning is advisory; a local disk error must not stop an assessment.
+                            pass
+                        tool_outcomes.append((learning_name, outcome))
+
+                        # Add result and refresh learned priorities for the next model turn.
                         context.add_tool_result(t_res)
+                        context.set_system_prompt(self._build_runtime_system_prompt(task_type))
 
                         await self._emit(
                             EventType.TOOL_CALL_END,
@@ -321,13 +432,39 @@ class LokiAgent:
                         run_id,
                         {"step_number": step_idx, "latency_ms": step_latency},
                     )
+
+                    unresolved = (
+                        is_investigation_request(prompt)
+                        and bool(self.registry.list_tools())
+                        and self._looks_unresolved(task_type, final_answer)
+                    )
+                    if (
+                        unresolved
+                        and continuation_count < self.max_adaptive_continuations
+                        and step_idx < self.max_steps
+                    ):
+                        continuation_count += 1
+                        context.add_user_message(
+                            self._continuation_message(
+                                task_type,
+                                tool_outcomes,
+                                continuation_count,
+                                self.max_adaptive_continuations,
+                            )
+                        )
+                        final_answer = ""
+                        continue
                     break
             else:
                 # Reached max steps: Request final synthesis from model
                 current_status = RunStatus.MAX_STEPS_REACHED
                 try:
                     context.add_user_message(
-                        "Step limit reached. Please synthesize all results, tool outputs, and observations gathered so far into a clear, comprehensive final answer."
+                        "The configured investigation step budget has been reached. Synthesize the results now. "
+                        "State whether the primary objective was verified, unresolved, or blocked; list distinct methods "
+                        "tried and their outcomes; distinguish observations from inferences; include relevant additional "
+                        "information; and explain which methods were not attempted and why. Never claim a CDN edge IP "
+                        "is the protected origin."
                     )
                     synthesis_resp = await self.provider.chat_complete(
                         messages=context.get_messages(),

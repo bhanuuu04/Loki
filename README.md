@@ -23,6 +23,7 @@
 - [Get started](#-get-started)
 - [Run the Web UI](#-run-the-web-ui)
 - [Assessment workflow](#-assessment-workflow)
+- [Adaptive investigations and tool learning](#-adaptive-investigations-and-tool-learning)
 - [Kali Linux tool intelligence](#-kali-linux-tool-intelligence)
 - [NOMERCY lab proof-of-access](#-nomercy-lab-proof-of-access)
 - [Command reference](#-command-reference)
@@ -221,6 +222,57 @@ Useful commands:
 ```
 
 Ask Loki to perform a specific assessment task and keep the target, objective, and constraints explicit. Review the evidence and findings before treating a result as confirmed.
+
+---
+
+## 🧠 Adaptive investigations and tool learning
+
+Loki now treats information-finding requests as objectives rather than one-shot lookups. When the model returns an unresolved answer after trying a method, the agent can send a bounded continuation instruction and ask for a different, authorized method.
+
+### How the investigation loop works
+
+1. Identify the primary objective and classify the task (for example, origin-IP verification, DNS reconnaissance, subdomain discovery, or web fingerprinting).
+2. Use the best available built-in method first, then discover alternatives where useful.
+3. Record each tool result as a coarse outcome: useful, partial, no result, error, or blocked.
+4. If the model tries to finish while the objective is still unresolved, Loki prompts it to continue with a materially different method. It is instructed not to repeat failed methods without a new hypothesis.
+5. Once the objective is answered—or the safe methods and run budget are exhausted—report the evidence, remaining uncertainty, and relevant side findings.
+
+The continuation budget is bounded. Configure it in `.env`:
+
+```env
+LOKI_MAX_STEPS=25
+LOKI_MAX_ADAPTIVE_CONTINUATIONS=8
+```
+
+The adaptive continuation setting accepts 0–12. Setting it to 0 disables automatic follow-up cycles. The overall run still obeys `LOKI_MAX_STEPS`, scope checks, execution policy, and tool-specific restrictions.
+
+### Persistent tool-effectiveness memory
+
+Loki learns which methods are more useful for similar task categories. For example, if several DNS methods return no data but an approved asset-inventory lookup provides a verified result, that method receives a higher priority for future origin-IP verification tasks.
+
+The score is smoothed, so one result does not permanently dominate. New tools begin with a neutral score. Tool rankings are advisory; Loki still has to verify the evidence and obey current scope.
+
+By default, the local memory file is:
+
+```text
+~/.loki/tool-performance.json
+```
+
+It stores only task categories, tool names, outcome counters, and timestamps. It does **not** store target names, prompts, credentials, command arguments, or raw tool output. Override the path with `LOKI_TOOL_PERFORMANCE_PATH`.
+
+Inspect or reset the learned priorities inside Loki:
+
+```text
+/tool performance
+/tool performance origin ip
+/tool reset-memory
+```
+
+Reset requires interactive confirmation. It clears only tool-effectiveness memory—not chat history, assessment records, or findings.
+
+### Origin IPs and CDNs
+
+Loki distinguishes a CDN edge address from a verified origin address. It can report in-scope DNS observations, provider clues, certificate names, server headers, and other useful metadata. It will not try to bypass the CDN, mine leaked origin databases, brute-force virtual hosts, exploit origin-discovery misconfigurations, or probe candidate hidden origin IPs. Confirming the origin requires owner-provided DNS-zone, CDN, hosting, or cloud asset inventory.
 
 ---
 
@@ -459,7 +511,7 @@ Loki also generates its operator security credentials locally and stores them se
 | Linux / macOS | `~/.loki/security.env` |
 | Windows | `%LOCALAPPDATA%\Loki\security.env` |
 
-The optional isolated shell image is configured separately with `LOKI_SHELL_DOCKER_IMAGE` in `.env`. It defaults to `alpine:latest`.
+The optional isolated shell image is configured separately with `LOKI_SHELL_DOCKER_IMAGE` in `.env`. It defaults to `alpine:latest`. Adaptive investigations are bounded by `LOKI_MAX_STEPS` and `LOKI_MAX_ADAPTIVE_CONTINUATIONS`.
 
 On POSIX systems, Loki applies restrictive permissions to the security directory and file. Run `loki doctor` to check setup status without displaying secret values.
 
