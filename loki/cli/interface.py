@@ -23,7 +23,7 @@ from loki.config import settings
 from loki.runtime.agent import LokiAgent
 from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
-from loki.tools.security_tools import scope_mgr
+from loki.tools.security_tools import scope_mgr, kali_tool_index
 from loki.providers.factory import get_provider
 from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file
@@ -267,6 +267,10 @@ class LokiConversationalCLI:
             table.add_row("/scope [add|exclude target]", "Inspect or update authorized target scope")
             table.add_row("/lab [status|enable|disable]", "Enable canary-only proof-of-access tools for a disposable lab")
             table.add_row("/tools", "List registered security tools")
+            table.add_row("/tool search <query>", "Search the synced Kali Linux tool catalogue")
+            table.add_row("/tool info <name>", "Inspect a Kali tool, package, or executable alias")
+            table.add_row("/tool installed", "List Kali tools detected on the Loki host")
+            table.add_row("/tool sync", "Sync the official Kali tools catalogue")
             table.add_row("/status", "Show active session telemetry & token usage")
             table.add_row("/history", "View conversation history")
             table.add_row("/reset", "Clear conversation memory and start fresh session")
@@ -447,10 +451,95 @@ class LokiConversationalCLI:
 
         elif sub == "/tools":
             tools = self.agent.registry.list_tools()
-            console.print(f"\n[bold cyan]Registered Tools ({len(tools)}):[/bold cyan]")
+            console.print(f"\n[bold cyan]Registered Runtime Tools ({len(tools)}):[/bold cyan]")
             for t in tools:
                 console.print(f" • [green]{t.name}[/green]: {t.description}")
+            if kali_tool_index.records:
+                console.print(f"\n[bold cyan]Kali Catalogue:[/bold cyan] {len(kali_tool_index.records)} cached source entries.")
+            else:
+                console.print("\n[yellow]Kali catalogue not synced. Run /tool sync or loki tools --sync-kali.[/yellow]")
             console.print("")
+
+        elif sub == "/tool":
+            tool_parts = arg.split(maxsplit=1)
+            action = tool_parts[0].lower() if tool_parts else "help"
+            value = tool_parts[1].strip() if len(tool_parts) > 1 else ""
+
+            if action == "sync":
+                try:
+                    metadata = kali_tool_index.sync_from_kali()
+                    console.print(
+                        f"[bold green]Kali catalogue synced: {metadata['tool_count']} source entries.[/bold green]"
+                    )
+                    console.print(f"[dim]Cached at: {kali_tool_index.cache_path}[/dim]")
+                except Exception as exc:
+                    console.print(f"[bold red]Kali catalogue sync failed:[/bold red] {exc}")
+                    if kali_tool_index.records:
+                        console.print("[yellow]Previous cached catalogue remains available.[/yellow]")
+
+            elif action == "search":
+                if not value:
+                    console.print("[yellow]Usage: /tool search <task, category, package, or executable>[/yellow]")
+                    return True
+                matches = kali_tool_index.search(value, limit=12)
+                if not matches:
+                    console.print("[yellow]No Kali catalogue matches. Sync with /tool sync first.[/yellow]")
+                else:
+                    table = Table(title=f"Kali Tool Matches ({len(matches)})", box=box.SIMPLE)
+                    table.add_column("Tool", style="green")
+                    table.add_column("Category")
+                    table.add_column("Host Status")
+                    table.add_column("Package(s)")
+                    table.add_column("Executables")
+                    for item in matches:
+                        table.add_row(
+                            item["name"],
+                            item["category"],
+                            "Installed" if item["is_installed"] else "Not detected",
+                            ", ".join(item["packages"][:3]) or "—",
+                            ", ".join(item["binaries"][:4]) or "—",
+                        )
+                    console.print(table)
+
+            elif action == "installed":
+                matches = kali_tool_index.search("", installed_only=True, limit=20)
+                if not matches:
+                    console.print("[yellow]No installed Kali catalogue binaries detected, or the index is not synced.[/yellow]")
+                else:
+                    for item in matches:
+                        console.print(
+                            f" • [green]{item['name']}[/green] — {item['installed_path']} "
+                            f"[dim]({item['category']})[/dim]"
+                        )
+                    console.print("[dim]Showing up to 20 detected entries. This checks host PATH, not the Docker image.[/dim]")
+
+            elif action == "info":
+                if not value:
+                    console.print("[yellow]Usage: /tool info <tool, package, or executable>[/yellow]")
+                    return True
+                item = kali_tool_index.get_tool(value)
+                if not item:
+                    console.print(f"[yellow]No Kali catalogue entry found for '{value}'.[/yellow]")
+                else:
+                    console.print(Panel(
+                        f"[bold]{item['name']}[/bold] ({item['category']})\n\n"
+                        f"{item.get('local_package_description') or item['summary']}\n\n"
+                        f"Packages: {', '.join(item['packages']) or 'not listed'}\n"
+                        f"Executables: {', '.join(item['binaries']) or 'not listed'}\n"
+                        f"Host path: {item['installed_path'] or 'not detected'}\n"
+                        f"Documentation: {item['documentation_url'] or item['source_url']}",
+                        title="Kali Tool Details",
+                        border_style="cyan",
+                    ))
+
+            else:
+                console.print(
+                    "[cyan]Kali catalogue commands:[/cyan]\n"
+                    "  /tool sync\n"
+                    "  /tool search <query>\n"
+                    "  /tool info <name>\n"
+                    "  /tool installed"
+                )
 
         elif sub == "/status":
             console.print(f"\n[bold cyan]Session Telemetry ({self.session_id}):[/bold cyan]")
