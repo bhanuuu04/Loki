@@ -308,7 +308,15 @@ Reset requires interactive confirmation. It clears only tool-effectiveness memor
 
 ### Origin IPs and CDNs
 
-Loki distinguishes a CDN edge address from a verified origin address. It can report in-scope DNS observations, provider clues, certificate names, server headers, and other useful metadata. It will not try to bypass the CDN, mine leaked origin databases, brute-force virtual hosts, exploit origin-discovery misconfigurations, or probe candidate hidden origin IPs. Confirming the origin requires owner-provided DNS-zone, CDN, hosting, or cloud asset inventory.
+A CDN (including Cloudflare) is not a blanket stop for origin attribution. In NOMERCY, Loki can pursue multiple passive and owner-authorized sources: current and historical DNS/passive DNS, certificate-transparency names, reverse-DNS/provider clues, public infrastructure metadata, HTTP/TLS fingerprints, and owner-provided DNS-zone, CDN, hosting, or cloud inventory.
+
+Loki labels evidence as a CDN edge, origin candidate, or verified origin instead of treating one DNS answer as proof. A discovered IP does not automatically become authorized. Before direct IP probing or HTTP/TLS validation, add the exact candidate IP or its containing CIDR to the assessment scope:
+
+```text
+/scope add 203.0.113.10
+```
+
+Once the address is explicitly in scope, NOMERCY can run supported, non-destructive service and origin validation through the Execution Gateway without asking for approval before every command. Where needed, direct HTTP/TLS checks should preserve the authorized hostname using the correct Host header and SNI. Loki must not evade CDN/WAF access controls, rate limits, authentication, or monitoring, and must not silently expand scope.
 
 ---
 
