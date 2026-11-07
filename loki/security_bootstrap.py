@@ -47,7 +47,7 @@ def load_security_environment() -> Path:
         values = dotenv_values(path)
         for key in SECURITY_ENV_KEYS:
             value = values.get(key)
-            if value and not os.environ.get(key):
+            if value and len(str(value).encode("utf-8")) >= 32 and not os.environ.get(key):
                 os.environ[key] = str(value)
     return path
 
@@ -123,7 +123,7 @@ def ensure_security_secrets() -> Dict[str, object]:
 
     # Keep only locally managed secrets in this file; externally injected values
     # remain in their configured secret manager/environment.
-    if private_values or not path.exists():
+    if private_values:
         for key in SECURITY_ENV_KEYS:
             if key not in private_values and key in stored:
                 private_values[key] = stored[key]
