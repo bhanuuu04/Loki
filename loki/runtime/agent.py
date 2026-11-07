@@ -219,7 +219,7 @@ class LokiAgent:
                 "\nNOMERCY FIELD PLAYBOOK (authorized high-intensity assessment)\n"
                 "- Treat NOMERCY as the broadest supported active-assessment mode, not passive-only mode.\n"
                 "- Do not produce canned 'What I Will Not Do' lists for techniques that are not actually blocked by policy.\n"
-                "- CDN presence is not a reason to abandon origin attribution. Follow the origin/CDN workflow in the operational rules, pursue multiple independent sources, and validate a candidate when its exact IP/CIDR is explicitly in scope.\n"
+                "- CDN presence is not a reason to abandon origin attribution. Follow the origin/CDN workflow in the operational rules, pursue multiple independent sources, and validate a candidate only when the candidate IP/CIDR is explicitly in scope.\n"
                 "- Execute supported, non-destructive in-scope checks autonomously through the gateway; do not ask for routine per-command approval.\n"
                 "- When a candidate IP is not yet in scope, keep working with passive methods and give the operator the exact /scope add <IP> command needed to authorize direct validation. Never silently add it.\n"
                 "- Use the appropriate registered network tools and Kali tool discovery; never pretend that a network-disabled shell or python_exec performed a live check.\n"
