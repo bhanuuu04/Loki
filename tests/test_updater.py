@@ -232,3 +232,32 @@ def test_local_commits_ahead_of_official_main_are_preserved(tmp_path):
     assert not result.updated
     assert any("unpushed commit(s)" in item for item in result.details)
     assert not any("merge" in cmd or "reset" in cmd for cmd in runner.commands)
+
+
+
+def test_cli_entrypoint_accepts_loki_update_check(monkeypatch):
+    import sys
+    from loki.cli import main as cli_main
+    from loki.cli import updater as updater_module
+    from loki.cli.updater import UpdateResult
+
+    calls = {}
+
+    class StubUpdater:
+        def run(self, *, check_only=False, skip_dependencies=False):
+            calls["check_only"] = check_only
+            calls["skip_dependencies"] = skip_dependencies
+            return UpdateResult(
+                success=True,
+                state="update_available",
+                message="2 upstream commit(s) are available.",
+                current_commit="a" * 40,
+                latest_commit="b" * 40,
+            )
+
+    monkeypatch.setattr(sys, "argv", ["loki", "update", "--check"])
+    monkeypatch.setattr(updater_module, "LokiUpdater", StubUpdater)
+
+    cli_main.cli_entrypoint()
+
+    assert calls == {"check_only": True, "skip_dependencies": False}
