@@ -21,6 +21,7 @@ import inspect
 import ipaddress
 import json
 import re
+import shlex
 import time
 import urllib.parse
 
@@ -117,9 +118,25 @@ class ExecutionGateway:
                         if isinstance(item, str) and item.strip():
                             targets.append(item.strip())
 
+        # Generic FQDN extraction catches service URIs such as ssh://host and
+        # positional targets used by hydra/medusa/ncrack, not only HTTP URLs.
+        file_extensions = {
+            "txt", "lst", "list", "wordlist", "csv", "json", "yaml", "yml", "xml",
+            "py", "sh", "conf", "ini", "log", "md", "zip", "gz", "tar", "db",
+            "sql", "pem", "key", "crt", "p12", "pfx",
+        }
+
         # Collect all string fragments from nested arguments and decoded strings
         all_strings = self._collect_all_strings(args)
         for s in all_strings:
+            # Extract DNS hostnames wherever they occur (including non-HTTP service URIs).
+            for candidate in re.findall(
+                r"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}(?![A-Za-z0-9_-])",
+                s,
+            ):
+                if candidate.rsplit(".", 1)[-1].lower() not in file_extensions:
+                    targets.append(candidate.rstrip(".").lower())
+
             # 1. Extract http/https URLs
             urls = re.findall(r"https?://[^\s\"'<>]+", s)
             for u in urls:
@@ -136,7 +153,7 @@ class ExecutionGateway:
 
             # 3. Extract targets following network commands (e.g. nmap, ping, curl, dig, etc.)
             net_cmd_match = re.findall(
-                r"\b(?:nmap|curl|wget|ping|nc|netcat|ssh|telnet|dig|nslookup|traceroute|nikto|sqlmap|ffuf)\s+(?:-[^\s]+\s+)*([a-zA-Z0-9_\-\.]+)",
+                r"\b(?:nmap|curl|wget|ping|nc|netcat|ssh|telnet|dig|nslookup|traceroute|nikto|sqlmap|ffuf|hydra|medusa|ncrack|patator|crowbar)\s+(?:-[^\s]+\s+)*([a-zA-Z0-9_\-\.]+)",
                 s,
                 re.IGNORECASE,
             )
@@ -391,6 +408,14 @@ class ExecutionGateway:
                 or tool_instance.has_capability(ToolCapability.SHELL)
             )
             is_target_interaction = tool_instance.has_capability(ToolCapability.TARGET_INTERACTION)
+
+        # Generic shell is also a command runner. Recognized network executables
+        # must provide a parseable target so the existing scope check can validate it.
+        if tool_name in ("run_command", "shell_exec", "bash"):
+            policy_args = [f"{key}={value}" for key, value in args.items()]
+            if self.policy_engine.command_requires_target(tool_name, policy_args):
+                is_network_tool = True
+                is_target_interaction = True
 
         # Fallback check for unregistered/generic tools
         if not is_network_tool and (
