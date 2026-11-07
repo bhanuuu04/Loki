@@ -181,13 +181,23 @@ class LokiAgent:
         if any(marker in value for marker in blocked):
             return False
 
+        terminal = (
+            "all safe methods exhausted", "no further safe method",
+            "no more authorized methods", "remaining methods are blocked",
+            "no additional supported tools",
+        )
+        if any(marker in value for marker in terminal):
+            return False
+
         unresolved = (
             "unable to", "cannot find", "can't find", "could not find",
             "couldn't find", "can't be found", "could not resolve", "unable to resolve",
             "no results", "no result", "not found", "not identified",
             "cannot determine", "can't determine", "unknown", "inconclusive",
             "origin remains unknown", "origin could not be confirmed",
-            "not enough evidence", "not verified", "couldn't identify",
+            "does not reveal the origin", "did not reveal the origin",
+            "edge address only", "not enough evidence", "not verified",
+            "couldn't identify",
         )
         if any(marker in value for marker in unresolved):
             return True
