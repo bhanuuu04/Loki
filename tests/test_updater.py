@@ -269,13 +269,18 @@ def test_updater_prefers_active_virtualenv_python(tmp_path, monkeypatch):
     import sys
 
     venv = tmp_path / ".venv"
-    executable = venv / "bin" / "python"
+    if os.name == "nt":
+        executable = venv / "Scripts" / "python.exe"
+        system_python = "C:/Python/python.exe"
+    else:
+        executable = venv / "bin" / "python"
+        system_python = "/usr/bin/python3"
     executable.parent.mkdir(parents=True)
     executable.write_text("", encoding="utf-8")
-    (venv / "pyvenv.cfg").write_text("home = /usr/bin", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("home = system-python", encoding="utf-8")
 
     monkeypatch.setenv("VIRTUAL_ENV", str(venv))
-    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    monkeypatch.setattr(sys, "executable", system_python)
 
     updater = LokiUpdater(repo_dir=tmp_path)
 
@@ -285,9 +290,14 @@ def test_updater_prefers_active_virtualenv_python(tmp_path, monkeypatch):
 
 
 def test_updater_uses_conda_environment_python_when_active(tmp_path, monkeypatch):
+    import os
+
     venv = tmp_path / "conda-env"
-    executable = venv / "bin" / "python"
-    executable.parent.mkdir(parents=True)
+    if os.name == "nt":
+        executable = venv / "python.exe"
+    else:
+        executable = venv / "bin" / "python"
+    executable.parent.mkdir(parents=True, exist_ok=True)
     executable.write_text("", encoding="utf-8")
     (venv / "conda-meta").mkdir()
 
