@@ -56,13 +56,17 @@ async def test_dns_lookup_and_scope():
 
 def test_configure_scope_flexible_inputs():
     from loki.tools.security_tools import configure_scope, scope_mgr
+    from loki.config import settings
+
+    operator_token = "test-operator-token-with-at-least-32-bytes"
+    settings.operator_token = operator_token
 
     # Single string target without assessment_name
-    res1 = configure_scope(targets="schoolknot.com")
+    res1 = configure_scope(targets="schoolknot.com", operator_token=operator_token)
     assert "Authorized Targets: ['schoolknot.com']" in res1
     assert "schoolknot.com" in scope_mgr.config.targets
 
     # Comma-separated string with URLs
-    res2 = configure_scope(targets="http://api.schoolknot.com:8080/path, https://blog.schoolknot.com")
+    res2 = configure_scope(targets="http://api.schoolknot.com:8080/path, https://blog.schoolknot.com", operator_token=operator_token)
     assert "api.schoolknot.com" in scope_mgr.config.targets
     assert "blog.schoolknot.com" in scope_mgr.config.targets
