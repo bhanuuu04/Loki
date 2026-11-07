@@ -22,6 +22,7 @@ from loki.knowledge.tool_registry.performance_memory import (
     ToolPerformanceMemory,
     classify_task,
     classify_tool_outcome,
+    effective_tool_name,
     is_investigation_request,
     tool_performance_memory,
 )
@@ -357,6 +358,7 @@ class LokiAgent:
                         tool_results.append(t_res)
 
                         # Persist only task category, tool name, and a coarse outcome label.
+                        learning_name = effective_tool_name(tc.name, tc.arguments)
                         outcome = classify_tool_outcome(
                             t_res.output,
                             is_error=t_res.is_error,
@@ -370,11 +372,11 @@ class LokiAgent:
                         } and outcome == "success":
                             outcome = "partial"
                         try:
-                            self.tool_learning.record(task_type, tc.name, outcome)
+                            self.tool_learning.record(task_type, learning_name, outcome)
                         except Exception:
                             # Learning is advisory; a local disk error must not stop an assessment.
                             pass
-                        tool_outcomes.append((tc.name, outcome))
+                        tool_outcomes.append((learning_name, outcome))
 
                         # Add result and refresh learned priorities for the next model turn.
                         context.add_tool_result(t_res)
