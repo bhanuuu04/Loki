@@ -123,3 +123,44 @@ def test_assessment_and_reporting_lifecycle(tmp_path):
     assert "FIND-101" in md
     assert "HIGH" in md
     assert "<!DOCTYPE html>" in html
+
+
+def test_audit_mode_allows_controlled_active_scanning():
+    scope = ScopeManager(ScopeConfig(assessment_name="Audit Test", targets=["target.local"]))
+    policy = PolicyEngine(scope_manager=scope, mode=ExecutionMode.AUDIT)
+    permitted, risk, _ = policy.evaluate_execution(
+        "run_command", ["command=sqlmap -u http://target.local/item?id=1"], target="target.local"
+    )
+    assert permitted
+    assert risk == CommandRisk.HIGH
+
+
+def test_bruteforce_requires_confirmed_nomercy_mode():
+    scope = ScopeManager(ScopeConfig(assessment_name="Nomercy Test", targets=["target.local"]))
+    policy = PolicyEngine(scope_manager=scope, mode=ExecutionMode.AUDIT)
+    permitted, _, reason = policy.evaluate_execution(
+        "run_command", ["command=hydra -l test -P passwords.txt target.local ssh"], target="target.local"
+    )
+    assert not permitted
+    assert "NOMERCY" in reason
+
+    with pytest.raises(PermissionError, match="explicit confirmation"):
+        policy.set_mode(ExecutionMode.NOMERCY)
+
+    policy.set_mode(ExecutionMode.NOMERCY, operator_confirmed=True)
+    permitted, risk, _ = policy.evaluate_execution(
+        "run_command", ["command=hydra -l test -P passwords.txt target.local ssh"], target="target.local"
+    )
+    assert permitted
+    assert risk == CommandRisk.HIGH
+
+
+@pytest.mark.parametrize("mode", [ExecutionMode.SAFE, ExecutionMode.AUDIT, ExecutionMode.NOMERCY])
+def test_denial_of_service_stress_tools_are_blocked_in_every_mode(mode):
+    scope = ScopeManager(ScopeConfig(assessment_name="Stress Test", targets=["target.local"]))
+    policy = PolicyEngine(scope_manager=scope, mode=mode)
+    permitted, risk, _ = policy.evaluate_execution(
+        "run_command", ["command=hping3 --flood target.local"], target="target.local"
+    )
+    assert not permitted
+    assert risk == CommandRisk.CRITICAL
