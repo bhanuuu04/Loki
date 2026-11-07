@@ -13,6 +13,7 @@ from threading import RLock
 from typing import Any, Dict, Iterable, List, Optional
 import json
 import os
+import shlex
 import re
 
 
@@ -105,6 +106,37 @@ def classify_task(prompt: str) -> str:
 def is_investigation_request(prompt: str) -> bool:
     """Return whether the prompt describes an information-finding task."""
     return bool(INVESTIGATION_VERBS.search(prompt or ""))
+
+
+def effective_tool_name(tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Extract the real executable when Loki invokes a command through run_command.
+
+    This makes learning distinguish curl, nmap, whatweb, etc. instead of giving
+    every shell-based method the same run_command score.
+    """
+    normalized = (tool_name or "").strip().lower()
+    if normalized not in {"run_command", "shell_exec", "bash"}:
+        return tool_name or "unknown"
+
+    command = str((arguments or {}).get("command", "")).strip()
+    if not command:
+        return normalized
+    try:
+        tokens = shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        tokens = command.split()
+    wrappers = {"sudo", "env", "stdbuf", "proxychains", "proxychains4", "nice", "time"}
+    while tokens and os.path.basename(tokens[0]).lower().removesuffix(".exe") in wrappers:
+        tokens.pop(0)
+    if tokens and os.path.basename(tokens[0]).lower().removesuffix(".exe") == "timeout":
+        tokens = tokens[2:]
+    if not tokens:
+        return normalized
+    executable = os.path.basename(tokens[0]).lower().removesuffix(".exe")
+    if re.fullmatch(r"[a-z0-9_.+-]{1,100}", executable):
+        return executable
+    return normalized
 
 
 def classify_tool_outcome(
