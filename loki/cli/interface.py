@@ -527,7 +527,6 @@ class LokiConversationalCLI:
                 )
 
             elif action == "reset-memory":
-                from rich.prompt import Confirm
                 if Confirm.ask(
                     "Clear Loki's local tool-effectiveness memory? This does not delete chat history or findings",
                     default=False,
