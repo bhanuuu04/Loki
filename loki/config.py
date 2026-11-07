@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Load any already-generated per-user secrets before settings are instantiated.
+from loki.security_bootstrap import load_security_environment
+load_security_environment()
+
 
 class LokiConfig(BaseModel):
     # Default LLM configuration
