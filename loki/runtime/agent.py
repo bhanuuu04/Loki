@@ -79,7 +79,7 @@ class LokiAgent:
         include_builtins: bool = True,
         include_security_tools: bool = True,
         tool_learning: Optional[ToolPerformanceMemory] = None,
-        max_adaptive_continuations: int = 8,
+        max_adaptive_continuations: Optional[int] = None,
     ):
         if isinstance(provider, str):
             self.provider = get_provider(provider)
@@ -93,7 +93,8 @@ class LokiAgent:
         self.temperature = temperature
         self.memory_store = memory_store or MemoryStore()
         self.tool_learning = tool_learning or tool_performance_memory
-        self.max_adaptive_continuations = max(0, min(int(max_adaptive_continuations), 12))
+        continuation_budget = settings.max_adaptive_continuations if max_adaptive_continuations is None else max_adaptive_continuations
+        self.max_adaptive_continuations = max(0, min(int(continuation_budget), 12))
 
         self.security_context = AssessmentSecurityContext.get_default()
         self._follow_default_security_context = gateway is None
@@ -421,6 +422,7 @@ class LokiAgent:
 
                     unresolved = (
                         is_investigation_request(prompt)
+                        and bool(self.registry.list_tools())
                         and self._looks_unresolved(task_type, final_answer)
                     )
                     if (
