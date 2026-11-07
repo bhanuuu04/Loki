@@ -285,7 +285,7 @@ def cli_entrypoint() -> None:
         if args.check:
             return
 
-        console.print("\\n[bold cyan]Running post-update diagnostics...[/bold cyan]")
+        console.print("\n[bold cyan]Running post-update diagnostics...[/bold cyan]")
         diagnostic_items = asyncio.run(LokiDoctor.run_diagnostics())
         healthy = LokiDoctor.display_report(diagnostic_items)
         if not healthy:
