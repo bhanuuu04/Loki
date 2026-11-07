@@ -42,8 +42,12 @@ async def test_tool_execution():
 
 def test_python_exec_isolated_subprocess():
     from loki.tools.builtins.python_tools import python_exec
+    from loki.executor.isolation import IsolatedExecutionEngine
     output = python_exec("print('isolated_calc:', 12 * 12)")
-    assert "isolated_calc: 144" in output
+    if not IsolatedExecutionEngine.is_docker_available():
+        assert "Execution refused" in output
+    else:
+        assert "isolated_calc: 144" in output
 
 
 @pytest.mark.asyncio
@@ -56,13 +60,38 @@ async def test_dns_lookup_and_scope():
 
 def test_configure_scope_flexible_inputs():
     from loki.tools.security_tools import configure_scope, scope_mgr
+    from loki.config import settings
+
+    operator_token = "test-operator-token-with-at-least-32-bytes"
+    settings.operator_token = operator_token
 
     # Single string target without assessment_name
-    res1 = configure_scope(targets="schoolknot.com")
+    res1 = configure_scope(targets="schoolknot.com", operator_token=operator_token)
     assert "Authorized Targets: ['schoolknot.com']" in res1
     assert "schoolknot.com" in scope_mgr.config.targets
 
     # Comma-separated string with URLs
-    res2 = configure_scope(targets="http://api.schoolknot.com:8080/path, https://blog.schoolknot.com")
+    res2 = configure_scope(targets="http://api.schoolknot.com:8080/path, https://blog.schoolknot.com", operator_token=operator_token)
     assert "api.schoolknot.com" in scope_mgr.config.targets
     assert "blog.schoolknot.com" in scope_mgr.config.targets
+
+
+
+def test_python_execution_fails_closed_without_docker(monkeypatch):
+    from loki.executor.isolation import IsolatedExecutionEngine, IsolationBackend
+    from loki.tools.builtins.python_tools import python_exec
+
+    monkeypatch.setattr(IsolatedExecutionEngine, "is_docker_available", classmethod(lambda cls: False))
+    output = python_exec("print('must not run on host')")
+    assert "Execution refused" in output
+
+
+@pytest.mark.asyncio
+async def test_shell_execution_fails_closed_without_docker(monkeypatch):
+    from loki.executor.isolation import IsolatedExecutionEngine, IsolationBackend
+
+    monkeypatch.setattr(IsolatedExecutionEngine, "is_docker_available", classmethod(lambda cls: False))
+    result = await IsolatedExecutionEngine.execute_shell("echo must-not-run")
+    assert result.backend == IsolationBackend.UNAVAILABLE
+    assert result.exit_code != 0
+    assert "host" in result.stderr.lower()

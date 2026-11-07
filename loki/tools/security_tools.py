@@ -9,6 +9,7 @@ import httpx
 import socket
 import asyncio
 import re
+import hmac
 
 from loki.tools.base import tool, ToolCapability
 from loki.security.scope_manager import ScopeManager, ScopeConfig
@@ -53,17 +54,14 @@ tool_catalog = SecurityToolCatalog()
 process_executor = SecureProcessExecutor()
 
 
-@tool(
-    name="authorize_target",
-    description="Check or verify authorization for a target under current assessment scope.",
-    capabilities=[ToolCapability.UTILITY],
-)
 def authorize_target(target: str, authorization_token: Optional[str] = None) -> str:
     """
     Verify if a target domain or IP is within the authorized assessment scope.
     Autonomous self-authorization by LLM reasoning is blocked to enforce scope correctness.
     """
     ctx = AssessmentSecurityContext.get_default()
+    if not ctx.active_assessment_id:
+        return "Authorization Denied: No active assessment is bound to this session."
     cleaned = ctx.scope_manager.normalize_target(target)
     if not cleaned:
         return "Error: Target identifier cannot be empty or invalid."
@@ -77,6 +75,7 @@ def authorize_target(target: str, authorization_token: Optional[str] = None) -> 
         from loki.security.authorization import OperatorAuthorizationManager
         is_valid, auth_reason, ticket = OperatorAuthorizationManager.verify_ticket(
             token_str=authorization_token,
+            assessment_id=ctx.active_assessment_id,
             target=cleaned,
         )
         if is_valid and ticket:
@@ -89,7 +88,9 @@ def authorize_target(target: str, authorization_token: Optional[str] = None) -> 
 
     # 2. Check static operator master token if configured
     expected_token = settings.operator_token
-    if expected_token and authorization_token and authorization_token.strip() == expected_token:
+    if (expected_token and len(expected_token.encode("utf-8")) >= 32
+            and authorization_token
+            and hmac.compare_digest(authorization_token.strip(), expected_token)):
         ctx.scope_manager.update_targets(
             add_targets=[cleaned],
             author="verified_operator",
@@ -100,24 +101,29 @@ def authorize_target(target: str, authorization_token: Optional[str] = None) -> 
     return (
         f"Authorization Denied: Target '{cleaned}' is not authorized. "
         "Autonomous self-authorization by the model is disabled. "
-        "Targets must be explicitly initialized or authorized by the operator via configure_assessment_scope."
+        "An authenticated operator must update the active assessment scope."
     )
 
 
-@tool(
-    name="configure_assessment_scope",
-    description="Explicitly initialize or update authorized assessment scope and targets.",
-    capabilities=[ToolCapability.UTILITY],
-)
 def configure_scope(
     targets: Union[List[str], str],
     assessment_name: Optional[str] = None,
     excluded_targets: Optional[Union[List[str], str]] = None,
     execution_mode: str = "safe",
+    operator_token: Optional[str] = None,
     operator_name: str = "operator",
     reason: Optional[str] = None,
 ) -> str:
-    """Set the assessment scope and boundaries with versioning and audit tracking."""
+    """
+    Trusted operator API for scope setup; deliberately not exposed as an LLM tool.
+    The caller must supply the independently provisioned LOKI_OPERATOR_TOKEN.
+    """
+    expected_token = settings.operator_token
+    if not expected_token or len(expected_token.encode("utf-8")) < 32:
+        return "Scope configuration denied: configure a high-entropy LOKI_OPERATOR_TOKEN (at least 32 bytes) first."
+    if not operator_token or not hmac.compare_digest(operator_token, expected_token):
+        return "Scope configuration denied: valid operator authentication is required."
+
     ctx = AssessmentSecurityContext.get_default()
 
     if isinstance(targets, str):
@@ -137,7 +143,7 @@ def configure_scope(
             cleaned_targets.append(c)
 
     if not cleaned_targets:
-        cleaned_targets = ["127.0.0.1", "localhost"]
+        return "Scope configuration denied: at least one valid target is required."
 
     clean_excluded = []
     if excluded_targets:
@@ -146,6 +152,7 @@ def configure_scope(
         elif isinstance(excluded_targets, (list, tuple)):
             clean_excluded = [ctx.scope_manager.normalize_target(str(e)) for e in excluded_targets if str(e).strip()]
 
+    clean_excluded = [target for target in clean_excluded if target]
     name = assessment_name or f"Assessment-{cleaned_targets[0]}"
 
     mode = ExecutionMode.SAFE
@@ -161,7 +168,7 @@ def configure_scope(
     ctx.configure_scope(
         config=config,
         mode=mode,
-        author=operator_name,
+        author="authenticated_operator",
         reason=reason or f"Configured scope for {name}",
     )
 
@@ -175,6 +182,7 @@ def configure_scope(
     )
     session.execution_mode = mode
     ctx.assessment_store.save_assessment(session)
+    ctx.active_assessment_id = session_id
 
     return f"Scope successfully configured for '{name}'. Authorized Targets: {cleaned_targets}. Excluded: {clean_excluded}. Mode: {mode.value.upper()}."
 
@@ -441,8 +449,7 @@ async def dns_lookup(domain: str) -> str:
 
 
 ALL_SECURITY_TOOLS = [
-    configure_scope,
-    authorize_target,
+    # Scope mutation and ticket use are trusted operator APIs, never LLM-callable tools.
     check_scope,
     enumerate_subdomains,
     dns_lookup,

@@ -2,7 +2,7 @@ name: Loki CI Matrix
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, "security/**" ]
   pull_request:
     branches: [ master, main ]
 

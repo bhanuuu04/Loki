@@ -315,6 +315,22 @@ class ExecutionGateway:
         tool_name = tool_call.name
         args = tool_call.arguments or {}
 
+        # Privileged security controls may only be called by trusted application code.
+        if tool_name in {"configure_assessment_scope", "authorize_target"}:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            message = f"Gateway Authorization Violation: '{tool_name}' is an operator-only operation."
+            self._log_audit(
+                tool_name=tool_name, target="none", args=list(args.keys()),
+                risk=CommandRisk.BLOCKED, authorized=False, status="blocked",
+                reason="LLM invocation of an operator-only security control",
+                output_summary=message,
+            )
+            return self.normalize_result(
+                tool_call.id, tool_name, message, is_error=True,
+                duration_ms=duration_ms,
+                metadata={"authorized": False, "risk": CommandRisk.BLOCKED.value},
+            )
+
         # -------------------------------------------------------------
         # 1. TOOL PRESENCE & CAPABILITY CHECK
         # -------------------------------------------------------------
@@ -460,6 +476,31 @@ class ExecutionGateway:
                 is_error=True,
                 duration_ms=duration_ms,
                 metadata={"risk": risk.value, "authorized": False, "policy_reason": policy_reason},
+            )
+
+        # Enforce security metadata as executable policy, not documentation.
+        metadata = getattr(tool_instance, "metadata", None)
+        approval_required = (
+            bool(getattr(metadata, "requires_human_approval", False))
+            or getattr(metadata, "required_permission_level", "standard") in {"elevated", "admin"}
+            or getattr(metadata, "risk_classification", "low") == "critical"
+        )
+        if approval_required:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            message = (
+                f"Gateway Approval Required: Tool '{tool_name}' requires out-of-band "
+                "operator approval. No LLM-supplied argument can satisfy this requirement."
+            )
+            self._log_audit(
+                tool_name=tool_name, target=primary_target, args=cmd_args_list,
+                risk=CommandRisk.BLOCKED, authorized=False, status="requires_approval",
+                reason="Tool metadata requires human approval and no trusted approval callback is configured",
+                output_summary=message,
+            )
+            return self.normalize_result(
+                tool_call.id, tool_name, message, is_error=True,
+                duration_ms=duration_ms,
+                metadata={"authorized": False, "requires_human_approval": True},
             )
 
         # -------------------------------------------------------------

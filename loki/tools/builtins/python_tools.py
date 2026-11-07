@@ -10,7 +10,7 @@ from loki.executor.isolation import IsolatedExecutionEngine
 
 @tool(
     name="python_exec",
-    description="Execute Python code in an isolated sandbox (Docker or restricted -I subprocess) and capture stdout, stderr, and results.",
+    description="Execute Python code inside a no-network Docker sandbox with resource limits and bounded output. Refuses execution when Docker isolation is unavailable.",
     capabilities=[ToolCapability.SYSTEM, ToolCapability.PYTHON],
 )
 def python_exec(code: str, timeout_seconds: int = 15) -> str:
