@@ -535,8 +535,8 @@ def record_finding(
     evidence: str,
     cwe_id: Optional[str] = None,
     cvss_score: float = 0.0,
-    requires: List[str] = [],
-    enables: List[str] = [],
+    requires: Optional[list] = None,
+    enables: Optional[list] = None,
 ) -> str:
     """Persist a finding only when its evidence is anchored to a real tool result."""
     ctx = AssessmentSecurityContext.get_default()
@@ -580,7 +580,7 @@ def record_finding(
     normalized_enables = normalize_capabilities(enables)
     requested_capabilities = {
         str(item).strip().lower().replace("-", "_").replace(" ", "_")
-        for item in requires + enables
+        for item in (requires or []) + (enables or [])
     }
     rejected_capabilities = sorted(requested_capabilities - CHAIN_CAPABILITIES)
     if rejected_capabilities:
