@@ -41,6 +41,7 @@ from loki.security.lab_verification import (
     validate_canary_marker,
 )
 from loki.config import settings
+from loki.executor.isolation import IsolatedExecutionEngine
 
 
 # Dynamic proxies ensuring calls always reflect the shared AssessmentSecurityContext
@@ -311,6 +312,62 @@ def discover_kali_tools(
             f"  Docs: {item['documentation_url'] or item['source_url']}"
         )
     return "\n".join(lines)
+
+
+@tool(
+    name="check_kali_tool_availability",
+    description=(
+        "Check whether a Kali catalogue executable is present INSIDE Loki's configured Docker shell image. "
+        "This runs only command -v in a short-lived, network-disabled container. It does not execute the tool "
+        "or contact a target. Use this after discover_kali_tools and before run_command."
+    ),
+    capabilities=[ToolCapability.UTILITY],
+)
+async def check_kali_tool_availability(tool_name: str) -> str:
+    """Safely check command availability inside the configured isolated shell image."""
+    item = kali_tool_index.get_tool(tool_name)
+    if not item:
+        return (
+            f"No Kali catalogue entry found for '{tool_name}'. "
+            "Sync the official catalogue before checking availability."
+        )
+
+    aliases = []
+    for candidate in item["binaries"][:12]:
+        if re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", candidate):
+            aliases.append(candidate)
+    if not aliases and re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", item["name"]):
+        aliases.append(item["name"])
+    if not aliases:
+        return f"No safe executable alias was listed for {item['name']}."
+
+    import shlex
+    quoted = " ".join(shlex.quote(alias) for alias in aliases)
+    command = (
+        "for loki_tool in " + quoted +
+        '; do command -v "$loki_tool" && echo "$loki_tool FOUND" && exit 0; done; exit 127'
+    )
+    result = await IsolatedExecutionEngine.execute_shell(
+        command=command,
+        timeout_seconds=5.0,
+        image=settings.shell_docker_image,
+        allow_network=False,
+    )
+    if result.exit_code == 0 and result.stdout.strip():
+        return (
+            f"AVAILABLE IN ISOLATED IMAGE {settings.shell_docker_image}:\n"
+            f"{result.stdout.strip()}\n"
+            "This was a command-presence check only; the selected tool has not been executed."
+        )
+    if result.backend.value == "unavailable":
+        return (
+            f"Could not check the image {settings.shell_docker_image}: {result.stderr}\n"
+            "No host fallback was attempted."
+        )
+    return (
+        f"NOT AVAILABLE in isolated image {settings.shell_docker_image}. "
+        f"Checked aliases: {', '.join(aliases)}. Exit code: {result.exit_code}."
+    )
 
 
 @tool(
@@ -884,6 +941,7 @@ ALL_SECURITY_TOOLS = [
     search_tools,
     discover_kali_tools,
     get_kali_tool_details,
+    check_kali_tool_availability,
     get_cwe,
     get_owasp,
     audit_headers,
