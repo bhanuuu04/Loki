@@ -104,6 +104,7 @@ Loki must not:
 - Promote a candidate to confirmed based on graph adjacency.
 - Assume credentials, roles, object IDs, network paths, or preconditions that were not observed.
 - Report critical impact without direct evidence of the combined impact.
+- Add component severities or use arithmetic on individual CVSS scores to rate a chain.
 
 ## 5. Safely validate a plausible chain
 
@@ -115,7 +116,7 @@ For each candidate, Loki should:
 4. Prefer read-only or low-impact checks using disposable test principals and fixtures.
 5. Run only supported checks that pass the mode and gateway policy.
 6. Capture an end-to-end reproduction record showing the starting condition, exact test action, observed result, and cleanup state.
-7. Mark the chain verified only when direct evidence demonstrates the combined impact.
+7. Mark the chain verified only when direct evidence demonstrates the combined impact. Then assess that combined consequence independently: a critical rating is valid only when the reproduced impact justifies it, never by adding component severities.
 
 For sensitive data-access claims, use seeded canaries in a disposable lab. A canary must be absent from the control response and present in the controlled test response before the payload is credited with the access. Never extract real user records to prove impact.
 
