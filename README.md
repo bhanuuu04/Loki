@@ -23,6 +23,7 @@
 - [Get started](#-get-started)
 - [Run the Web UI](#-run-the-web-ui)
 - [Assessment workflow](#-assessment-workflow)
+- [Kali Linux tool intelligence](#-kali-linux-tool-intelligence)
 - [NOMERCY lab proof-of-access](#-nomercy-lab-proof-of-access)
 - [Command reference](#-command-reference)
 - [Configuration and secrets](#-configuration-and-secrets)
@@ -51,7 +52,7 @@ Loki can be used through its interactive CLI or its local FastAPI-based Web UI.
 | **AI providers** | NVIDIA NIM, OpenAI, Google Gemini, Ollama, and an offline Mock provider |
 | **Assessment policies** | SAFE, AUDIT, and NOMERCY modes with operator confirmation for high-intensity testing |
 | **Scope management** | Approved targets, exclusions, and scope checks before target interaction |
-| **Kali tool intelligence** | Searchable index synced from Kali's official All Tools catalogue, including tool entries, packages, executable aliases, categories, docs, and host detection |
+| **Kali tool intelligence** | Search across 500+ entries from Kali's official All Tools catalogue, including tool names, packages, executable aliases, categories, docs, and host detection |
 | **Tool calling** | On-demand discovery and detail functions so the model selects relevant tools without loading hundreds of function schemas |
 | **Security tooling** | Scope-governed built-in checks, assessment findings, and reporting support |
 | **Lab verification** | Canary-based proof-of-access checks for seeded dummy records in disposable environments |
@@ -265,10 +266,11 @@ Inside an interactive session:
 
 ### 3. How Loki chooses tools
 
-The model has two on-demand discovery functions:
+The model has three on-demand discovery functions:
 
 - **discover_kali_tools** — finds candidate tools by task, category, package, or executable name.
 - **get_kali_tool_details** — inspects one candidate and returns package information, aliases, host detection, and official documentation.
+- **check_kali_tool_availability** — runs a network-disabled `command -v` probe inside the configured Docker image. It does not execute the tool.
 
 The agent is instructed to discover first, inspect one candidate, check authorization when relevant, and then make a minimal tool call. It does not receive hundreds of extra function schemas on every turn; it queries the catalogue when it needs to.
 
@@ -432,6 +434,10 @@ A direct canary match proves that the seeded record was retrievable. It does **n
 | `/lab enable` | Enable canary verification after confirmation |
 | `/lab disable` | Disable canary verification |
 | `/tools` | List available tools |
+| `/tool search <query>` | Search Kali tools by objective or name |
+| `/tool info <name>` | Inspect a Kali package, tool, or executable |
+| `/tool installed` | List detected host binaries from the Kali index |
+| `/tool sync` | Sync the official Kali tools catalogue |
 | `/status` | Show session status |
 | `/history` | View conversation history |
 | `/reset` | Reset conversation memory |
@@ -451,9 +457,9 @@ Loki also generates its operator security credentials locally and stores them se
 | Operating system | Location |
 | --- | --- |
 | Linux / macOS | `~/.loki/security.env` |
+| Windows | `%LOCALAPPDATA%\Loki\security.env` |
 
 The optional isolated shell image is configured separately with `LOKI_SHELL_DOCKER_IMAGE` in `.env`. It defaults to `alpine:latest`.
-| Windows | `%LOCALAPPDATA%\\Loki\\security.env` |
 
 On POSIX systems, Loki applies restrictive permissions to the security directory and file. Run `loki doctor` to check setup status without displaying secret values.
 
