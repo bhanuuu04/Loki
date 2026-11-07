@@ -224,22 +224,30 @@ All unit and integration test cases pass natively.
 
 ## Security configuration and isolated execution
 
-Loki deliberately separates model-callable assessment tools from operator-only scope controls.
+Loki automatically creates its operator credentials during `loki setup` (and on first chat startup if setup was skipped). Users do **not** need to manually generate or export security keys.
 
-Before configuring an assessment, provision a long, random operator token and a separate signing key. Both must be at least 32 bytes. Generate independent values with:
+The independent `LOKI_OPERATOR_TOKEN` and `LOKI_AUTH_SIGNING_KEY` values are generated locally and stored outside the repository in:
+- Linux/macOS: `~/.loki/security.env`
+- Windows: `%LOCALAPPDATA%\\Loki\\security.env`
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
+On POSIX systems, Loki restricts the directory to owner-only access (`0700`) and the secret file to owner read/write (`0600`). Existing process/environment credentials take precedence. Secrets are never printed or written to the project's `.env` file. The security file is preserved when provider configuration is reset.
 
-Set these environment variables in the trusted application environment (never in the model prompt or assessment context):
+Scope configuration and authorization-ticket issuance remain operator-side operations, never LLM-callable tools. Tickets are bound to the active assessment and approved target. Run `loki doctor` to inspect setup status without displaying secret values.
 
-- `LOKI_OPERATOR_TOKEN`: required by the trusted `configure_scope(..., operator_token=...)` API and by `OperatorAuthorizationManager.issue_ticket(..., operator_token=...)`.
-- `LOKI_AUTH_SIGNING_KEY`: required to sign and verify operator authorization tickets. There is no built-in default key.
-- `LOKI_AUTH_REVOCATION_FILE`: optional path for the durable ticket-revocation JSON store. By default Loki uses `~/.loki/revoked_tickets.json`.
+## Assessment modes
 
-Scope configuration and ticket issuance are operator-side application operations; they are not exposed as LLM-callable tools. Tickets are bound to an active assessment and must cover the requested target.
+Switch modes inside chat with `/mode safe`, `/mode audit`, or `/mode nomercy`.
 
-**Docker is required for generated shell and Python execution.** Loki refuses these operations if the Docker daemon is unavailable or a container cannot be started. It does not fall back to running generated shell commands or Python code directly on the host. Generated Python containers have networking disabled; shell containers also default to networking disabled.
+| Mode | Behaviour |
+| :--- | :--- |
+| `SAFE` | Passive reconnaissance and low-impact checks. High-risk active scanning and credential testing are blocked. |
+| `AUDIT` | Controlled active vulnerability testing, including injection probes, scanners and fuzzing, within the approved target scope. |
+| `NOMERCY` | Highest testing intensity. Enables recognized credential-audit tools after explicit operator confirmation. Destructive and denial-of-service/stress-test operations remain blocked. |
 
-Do not place operator tokens, signing keys, passwords, bearer tokens, or session cookies in prompts or tool arguments. Store secrets in a protected environment or secrets manager.
+Old mode names `aggressive` and `advanced_audit` remain accepted as aliases for `audit` and `nomercy`.
+
+**Modes never expand scope.** All network targets must still be within the explicitly approved assessment scope, excluded targets remain blocked, and shell/Python code runs in Docker rather than directly on the host. Per-minute policy limits apply to tool invocations; they are not a substitute for a per-login attempt budget inside a third-party brute-force utility.
+
+**Docker is required for generated shell and Python execution.** Loki refuses these operations if Docker is unavailable or a container cannot be started. Python containers have networking disabled, and shell containers default to networking disabled. Do not enable unrestricted container egress: active remote testing needs a scope-aware network enforcement layer before broad network access is enabled.
+
+Do not place API keys, passwords, bearer tokens, or session cookies in prompts or tool arguments. Store provider credentials in the local provider configuration and secrets in protected environment variables or a secrets manager.
