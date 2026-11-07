@@ -229,11 +229,11 @@ Ask Loki to perform a specific assessment task and keep the target, objective, a
 
 You can give Loki a broad assessment objective after configuring an authorized target and the appropriate mode:
 
-\`\`\`text
+```text
 Perform a detailed vulnerability assessment of the in-scope application.
 Validate important findings, correlate them into possible attack chains,
 and verify combined impact where a safe supported test exists.
-\`\`\`
+```
 
 Loki is instructed to investigate the attack surface in phases, choose supported checks based on observed technologies, validate scanner leads, and keep trying materially different in-scope methods within the run budget. It does not ask for approval before every routine command once the engagement scope and mode are set.
 
@@ -241,7 +241,7 @@ Loki is instructed to investigate the attack surface in phases, choose supported
 
 Successful tool outputs authorized by the Execution Gateway are automatically stored as bounded, secret-redacted evidence while an assessment is active. Loki attaches a stable evidence marker to the tool result:
 
-\`[LOKI_EVIDENCE_ID: <id>]\`
+`[LOKI_EVIDENCE_ID: <id>]`
 
 A finding must cite an evidence ID from the active assessment and provide an exact excerpt from that stored result. Loki checks the evidence record's integrity hash and rejects missing, unauthorized, mismatched, cross-assessment, or fabricated excerpts. A scanner alert, version banner, HTTP status, reflected payload, or model hypothesis is a lead—not proof that a vulnerability is exploitable.
 
