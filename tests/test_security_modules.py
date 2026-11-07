@@ -164,3 +164,33 @@ def test_denial_of_service_stress_tools_are_blocked_in_every_mode(mode):
     )
     assert not permitted
     assert risk == CommandRisk.CRITICAL
+
+
+def test_lab_data_verification_is_classified_as_high_risk_active_test():
+    scope = ScopeManager(ScopeConfig(
+        assessment_name="Lab Probe Policy",
+        targets=["lab.example.test"],
+        dns_check_enabled=False,
+    ))
+    policy = PolicyEngine(scope_manager=scope, mode=ExecutionMode.SAFE)
+    risk = policy.classify_command("verify_lab_data_access", [
+        "url=https://lab.example.test/api/records",
+        "canary_marker=LOKI-LAB-CANARY:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ])
+    assert risk == CommandRisk.HIGH
+
+    permitted, _, reason = policy.evaluate_execution(
+        "verify_lab_data_access",
+        ["url=https://lab.example.test/api/records"],
+        target="lab.example.test",
+    )
+    assert not permitted
+    assert "SAFE" in reason
+
+    policy.set_mode(ExecutionMode.NOMERCY, operator_confirmed=True)
+    permitted, _, _ = policy.evaluate_execution(
+        "verify_lab_data_access",
+        ["url=https://lab.example.test/api/records"],
+        target="lab.example.test",
+    )
+    assert permitted
