@@ -166,3 +166,39 @@ def test_record_finding_rejects_excerpt_not_in_evidence_record(tmp_path):
     assert "exact excerpt" in result
     session = ctx.assessment_store.load_assessment(ctx.active_assessment_id)
     assert all(item.finding_id != "F-FABRICATED" for item in session.findings)
+
+
+def test_agent_persists_authorized_tool_output_as_redacted_evidence(tmp_path):
+    from loki.runtime.agent import LokiAgent
+    from loki.types import ToolCall, ToolResult
+
+    ctx = _active_assessment(tmp_path)
+    agent = LokiAgent(provider="mock")
+    result = ToolResult(
+        call_id="call-evidence-1",
+        tool_name="audit_http_security_headers",
+        output=(
+            "HTTP/1.1 200 OK\n"
+            "Authorization: Bearer do-not-store-this-token\n"
+            "Cookie: session=do-not-store-this-cookie\n"
+            "Observed: Strict-Transport-Security header is absent."
+        ),
+        metadata={"authorized": True, "target": "app.example.test"},
+    )
+    call = ToolCall(
+        id="call-evidence-1",
+        name="audit_http_security_headers",
+        arguments={"url": "https://app.example.test"},
+    )
+
+    agent._persist_tool_evidence(call, result)
+
+    assert "LOKI_EVIDENCE_ID:" in result.output
+    assert "do-not-store-this-token" not in result.output
+    assert "do-not-store-this-cookie" not in result.output
+    evidence_id = result.metadata["evidence_record_id"]
+    record = ctx.assessment_store.get_evidence(ctx.active_assessment_id, evidence_id)
+    assert record is not None
+    assert record["metadata"]["authorized"] is True
+    assert "do-not-store-this-token" not in record["raw_output"]
+    assert "Strict-Transport-Security header is absent" in record["raw_output"]
