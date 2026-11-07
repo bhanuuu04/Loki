@@ -34,3 +34,18 @@ def test_cli_slash_commands():
     # Test /exit
     assert cli.handle_command("/exit") is False
     assert cli.handle_command("/quit") is False
+
+
+def test_cli_nomercy_requires_interactive_confirmation(monkeypatch):
+    from loki.cli import interface as interface_module
+    cli = LokiConversationalCLI(provider="mock")
+
+    monkeypatch.setattr(interface_module.Confirm, "ask", lambda *args, **kwargs: False)
+    assert cli.handle_command("/mode nomercy") is True
+    assert cli.mode == ExecutionMode.SAFE
+    assert cli.agent.gateway.policy_engine.mode == ExecutionMode.SAFE
+
+    monkeypatch.setattr(interface_module.Confirm, "ask", lambda *args, **kwargs: True)
+    assert cli.handle_command("/mode nomercy") is True
+    assert cli.mode == ExecutionMode.NOMERCY
+    assert cli.agent.gateway.policy_engine.mode == ExecutionMode.NOMERCY
