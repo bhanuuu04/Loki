@@ -299,7 +299,7 @@ def discover_kali_tools(
 
     lines = [
         f"Kali catalogue results: {len(matches)} (cached index: {len(kali_tool_index.records)} source entries).",
-        "Host detection does not guarantee the binary exists inside Loki's Docker shell image.",
+        f"Configured isolated shell image: {settings.shell_docker_image}. Host detection does not guarantee the binary exists inside this image.",
     ]
     for item in matches:
         host_status = f"HOST INSTALLED at {item['installed_path']}" if item["is_installed"] else "NOT DETECTED ON HOST"
@@ -396,7 +396,8 @@ def get_kali_tool_details(tool_name: str) -> str:
         f"Detected on Loki host: {installed or 'No matching executable found on PATH'}",
         f"Install hint (not executed by Loki): {item['install_hint']}",
         f"Documentation: {item['documentation_url'] or item['source_url']}",
-        "Important: catalogue membership is not proof that this tool is installed in the Docker shell image.",
+        f"Configured isolated shell image: {settings.shell_docker_image}",
+        "Use check_kali_tool_availability to verify the binary inside that image before execution.",
         "Use a documented, minimal command. Network actions still require a dedicated scoped network capability; the generic Docker shell remains network-disabled.",
     ]
     return "\n".join(lines)
