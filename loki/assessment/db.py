@@ -372,6 +372,28 @@ class DatabaseManager:
             )
         return evidence_id
 
+    def get_evidence(self, session_id: str, evidence_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve one evidence record scoped to its owning assessment."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT evidence_id, session_id, task_id, tool_name, command_args, "
+                "output_hash, raw_output, metadata_json, created_at "
+                "FROM evidence WHERE evidence_id = ? AND session_id = ?",
+                (evidence_id, session_id),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        try:
+            result["command_args"] = json.loads(result.get("command_args") or "[]")
+        except (TypeError, ValueError):
+            result["command_args"] = []
+        try:
+            result["metadata"] = json.loads(result.get("metadata_json") or "{}")
+        except (TypeError, ValueError):
+            result["metadata"] = {}
+        return result
+
     # -------------------------------------------------------------
     # CONVERSATION SESSION MEMORY
     # -------------------------------------------------------------
