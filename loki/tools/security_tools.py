@@ -24,6 +24,7 @@ from loki.knowledge.cwe_database import lookup_cwe
 from loki.knowledge.owasp_knowledge import lookup_owasp
 from loki.knowledge.tool_registry.catalog import SecurityToolCatalog
 from loki.knowledge.tool_registry.kali_catalog import KaliToolIndex
+from loki.knowledge.tool_registry.performance_memory import classify_task, tool_performance_memory
 from loki.executor.process_manager import SecureProcessExecutor
 from loki.executor.output_parser import OutputParser
 from loki.assessment.store import AssessmentStore
@@ -227,32 +228,44 @@ def check_scope(target: str) -> str:
     capabilities=[ToolCapability.UTILITY],
 )
 def search_tools(query: str) -> str:
-    """Find relevant tools in Loki's curated catalogue and the synced Kali index."""
+    """Find relevant tools, prioritizing methods with stronger historical outcomes."""
+    task_type = classify_task(query)
     curated = tool_catalog.search_by_objective(query)
     results = []
     for entry in curated[:5]:
         status = "[INSTALLED ON HOST]" if entry.is_installed else "[NOT DETECTED ON HOST]"
         command_purposes = "; ".join(command.purpose for command in entry.commands) or "No validated command template"
+        stats = tool_performance_memory.get_task_stats(task_type).get(entry.name, {})
+        learned = f"Historical score: {stats['score']:.2f}" if stats else "No history yet"
         results.append(
             f"• {entry.name} {status} ({entry.category.value}): {entry.description}\n"
             f"  Guidance: {command_purposes}\n"
+            f"  {learned}\n"
             f"  Package: {entry.installation_method}\n"
             f"  Documentation: {entry.documentation_url}"
         )
 
-    indexed = kali_tool_index.search(query=query, limit=6)
+    indexed = kali_tool_index.search(query=query, limit=10)
+    names = tool_performance_memory.rank_tool_names(
+        task_type, [entry["name"] for entry in indexed]
+    )
+    by_name = {entry["name"]: entry for entry in indexed}
     curated_names = {entry.name.lower() for entry in curated}
-    for entry in indexed:
+    for name in names:
+        entry = by_name[name]
         if entry["name"].lower() in curated_names:
             continue
         installed = entry["installed_path"]
         status = f"[HOST INSTALLED: {installed}]" if installed else "[NOT DETECTED ON HOST]"
         binaries = ", ".join(entry["binaries"][:6]) or entry["name"]
         packages = ", ".join(entry["packages"][:4]) or "package not listed"
+        stats = tool_performance_memory.get_task_stats(task_type).get(entry["name"], {})
+        learned = f"Historical score: {stats['score']:.2f}" if stats else "No history yet"
         results.append(
             f"• {entry['name']} {status} ({entry['category']}): {entry['summary']}\n"
             f"  Executable aliases: {binaries}\n"
             f"  Kali package(s): {packages}\n"
+            f"  {learned}\n"
             f"  Documentation: {entry['documentation_url'] or entry['source_url']}"
         )
 
@@ -264,6 +277,7 @@ def search_tools(query: str) -> str:
             )
         return f"No documented tools matched query: '{query}'."
     return "\n\n".join(results[:10])
+
 
 
 @tool(
@@ -282,7 +296,7 @@ def discover_kali_tools(
     installed_only: bool = False,
     limit: int = 8,
 ) -> str:
-    """Find Kali tools by task, category, package, or executable name."""
+    """Find Kali tools and rank them using task-specific outcome history."""
     matches = kali_tool_index.search(
         query=query,
         category=category,
@@ -297,14 +311,31 @@ def discover_kali_tools(
             )
         return "No Kali catalogue matches were found. Try a broader task description or category."
 
+    task_type = classify_task(query)
+    ranked_names = tool_performance_memory.rank_tool_names(
+        task_type, [item["name"] for item in matches]
+    )
+    by_name = {item["name"]: item for item in matches}
+    matches = [by_name[name] for name in ranked_names]
+    stats_by_name = tool_performance_memory.get_task_stats(task_type)
+
     lines = [
         f"Kali catalogue results: {len(matches)} (cached index: {len(kali_tool_index.records)} source entries).",
+        f"Task category: {task_type}. Results are ranked with learned tool outcomes when available.",
         f"Configured isolated shell image: {settings.shell_docker_image}. Host detection does not guarantee the binary exists inside this image.",
     ]
     for item in matches:
         host_status = f"HOST INSTALLED at {item['installed_path']}" if item["is_installed"] else "NOT DETECTED ON HOST"
+        stats = stats_by_name.get(item["name"], {})
+        learned = (
+            f"LEARNED SCORE {stats['score']:.2f}; useful={stats['success']}, "
+            f"partial={stats['partial']}, no-result={stats['no_result']}, "
+            f"errors={stats['error']}, blocked={stats['blocked']}"
+            if stats else "No prior outcomes for this task category"
+        )
         lines.append(
             f"\n• {item['name']} — {item['category']} — {host_status}\n"
+            f"  {learned}\n"
             f"  Purpose: {item['summary']}\n"
             f"  Packages: {', '.join(item['packages'][:6]) or 'not listed'}\n"
             f"  Executables: {', '.join(item['binaries'][:8]) or 'not listed'}\n"
@@ -312,6 +343,7 @@ def discover_kali_tools(
             f"  Docs: {item['documentation_url'] or item['source_url']}"
         )
     return "\n".join(lines)
+
 
 
 @tool(
