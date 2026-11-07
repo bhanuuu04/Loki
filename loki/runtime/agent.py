@@ -161,13 +161,13 @@ class LokiAgent:
             "target list from conversation history or claim that a listed target is out of "
             "scope based on stale context. Prefer the built-in authorization/DNS tools when "
             "checking a target. The Execution Gateway remains the final authority and may "
-            "still reject an address that resolves into a forbidden or excluded network.\\n\\n"
-            f"CURRENT OBJECTIVE CATEGORY: {task_type}\\n"
-            "LEARNED TOOL EFFECTIVENESS (privacy-preserving local history):\\n"
-            f"{self.tool_learning.format_guidance(task_type)}\\n\\n"
+            "still reject an address that resolves into a forbidden or excluded network.\n\n"
+            f"CURRENT OBJECTIVE CATEGORY: {task_type}\n"
+            "LEARNED TOOL EFFECTIVENESS (privacy-preserving local history):\n"
+            f"{self.tool_learning.format_guidance(task_type)}\n\n"
             "When the objective is unresolved, use a different source/method rather than stopping after one failed lookup. "
             "Do not repeat failed methods without a new hypothesis. Use learned rankings to choose the next candidate, "
-            "but verify every result and remain within scope.\\n"
+            "but verify every result and remain within scope.\n"
         )
 
     @staticmethod
@@ -182,9 +182,10 @@ class LokiAgent:
 
         unresolved = (
             "unable to", "cannot find", "can't find", "could not find",
-            "couldn't find", "could not resolve", "unable to resolve",
+            "couldn't find", "can't be found", "could not resolve", "unable to resolve",
             "no results", "no result", "not found", "not identified",
             "cannot determine", "can't determine", "unknown", "inconclusive",
+            "origin remains unknown", "origin could not be confirmed",
             "not enough evidence", "not verified", "couldn't identify",
         )
         if any(marker in value for marker in unresolved):
@@ -259,7 +260,6 @@ class LokiAgent:
         task_type = classify_task(prompt)
         runtime_system_prompt = self._build_runtime_system_prompt(task_type)
         tool_outcomes: List[tuple[str, str]] = []
-        distinct_tools_used: set[str] = set()
         continuation_count = 0
 
         # Initialize or load context
@@ -344,7 +344,6 @@ class LokiAgent:
                         # Execute tool through the existing policy/scope gateway.
                         t_res = await self.registry.execute_call(tc)
                         tool_results.append(t_res)
-                        distinct_tools_used.add(tc.name)
 
                         # Persist only task category, tool name, and a coarse outcome label.
                         outcome = classify_tool_outcome(
