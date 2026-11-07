@@ -21,6 +21,7 @@ async def run_command(command: str, timeout_seconds: int = 30) -> str:
     result = await IsolatedExecutionEngine.execute_shell(
         command=command,
         timeout_seconds=float(timeout_seconds),
+        image=settings.shell_docker_image,
     )
 
     output_parts = [
