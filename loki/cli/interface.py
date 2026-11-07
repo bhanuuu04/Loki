@@ -272,6 +272,7 @@ class LokiConversationalCLI:
             table.add_row("/tool info <name>", "Inspect a Kali tool, package, or executable alias")
             table.add_row("/tool installed", "List Kali tools detected on the Loki host")
             table.add_row("/tool performance [task]", "View learned tool effectiveness and priorities")
+            table.add_row("/tool reset-memory", "Clear learned tool priorities after confirmation")
             table.add_row("/tool sync", "Sync the official Kali tools catalogue")
             table.add_row("/status", "Show active session telemetry & token usage")
             table.add_row("/history", "View conversation history")
