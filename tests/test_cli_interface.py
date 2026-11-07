@@ -49,3 +49,40 @@ def test_cli_nomercy_requires_interactive_confirmation(monkeypatch):
     assert cli.handle_command("/mode nomercy") is True
     assert cli.mode == ExecutionMode.NOMERCY
     assert cli.agent.gateway.policy_engine.mode == ExecutionMode.NOMERCY
+
+
+def test_lab_mode_requires_nomercy_and_creates_assessment(tmp_path, monkeypatch):
+    from loki.cli import interface as interface_module
+    from loki.assessment.store import AssessmentStore
+    from loki.security.context import AssessmentSecurityContext
+    from loki.security.scope_manager import ScopeConfig, ScopeManager
+
+    scope = ScopeManager(ScopeConfig(
+        assessment_name="CLI Disposable Lab",
+        targets=["lab.example.test"],
+        dns_check_enabled=False,
+    ))
+    ctx = AssessmentSecurityContext(scope_manager=scope)
+    ctx.assessment_store = AssessmentStore(storage_dir=str(tmp_path / "assessments"))
+    AssessmentSecurityContext.reset_default(ctx)
+
+    cli = LokiConversationalCLI(provider="mock")
+    monkeypatch.setattr(interface_module.Confirm, "ask", lambda *args, **kwargs: True)
+
+    # SAFE/AUDIT cannot activate the lab data verification feature.
+    assert cli.handle_command("/lab enable") is True
+    assert not ctx.scope_manager.config.lab_mode_enabled
+    assert ctx.active_assessment_id is None
+
+    cli.agent.gateway.policy_engine.set_mode(ExecutionMode.NOMERCY, operator_confirmed=True)
+    cli.mode = ExecutionMode.NOMERCY
+    assert cli.handle_command("/lab enable") is True
+    assert ctx.scope_manager.config.lab_mode_enabled
+    assert ctx.active_assessment_id
+    session = ctx.assessment_store.load_assessment(ctx.active_assessment_id)
+    assert session is not None
+    assert session.execution_mode == ExecutionMode.NOMERCY
+    assert session.scope.lab_mode_enabled
+
+    assert cli.handle_command("/lab disable") is True
+    assert not ctx.scope_manager.config.lab_mode_enabled

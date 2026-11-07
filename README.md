@@ -251,3 +251,35 @@ Old mode names `aggressive` and `advanced_audit` remain accepted as aliases for 
 **Docker is required for generated shell and Python execution.** Loki refuses these operations if Docker is unavailable or a container cannot be started. Python containers have networking disabled, and shell containers default to networking disabled. Do not enable unrestricted container egress: active remote testing needs a scope-aware network enforcement layer before broad network access is enabled.
 
 Do not place API keys, passwords, bearer tokens, or session cookies in prompts or tool arguments. Store provider credentials in the local provider configuration and secrets in protected environment variables or a secrets manager.
+
+
+## NOMERCY lab proof-of-access
+
+NOMERCY can verify that a seeded **dummy** record is retrievable, rather than treating a reflected payload or generic SQL error as proof.
+
+1. Add only disposable test targets with `/scope add <lab-host>`.
+2. Switch to `/mode nomercy` and explicitly confirm the mode.
+3. Generate a marker with `loki lab-canary`.
+4. Seed the exact marker into a dummy JSON record under the field `loki_canary`, for example:
+
+```json
+{
+  "id": "loki-fixture-001",
+  "loki_canary": "LOKI-LAB-CANARY:paste-the-generated-value-here",
+  "record": "dummy-lab-data"
+}
+```
+
+5. Run `/lab enable` and confirm the disposable lab environment.
+6. Ask Loki to fetch the fixture directly, or to test one query parameter using a payload and then verify whether the canary record was returned.
+
+The `verify_lab_data_access` tool:
+- Is available only in NOMERCY after explicit `/lab enable`.
+- When no payload is supplied, performs one HTTP GET and reports direct canary data access without calling it an exploit.
+- When a payload is supplied, performs a no-payload control GET first, then one injected GET to the same scoped endpoint and query parameter.
+- Does not send cookies, credentials, or the canary marker; it does not follow redirects.
+- Requires a JSON response no larger than 64 KiB and an exact canary field match.
+- Returns only the matching fixture record, with sensitive-looking fields redacted. It does not dump tables, credentials, or unrelated records.
+- Creates a confirmed injection finding only when the canary is absent from the control response and present in the payload response. If the record is already accessible without the payload, it reports data access but does not claim the payload caused an exploit.
+
+`/lab disable` immediately disables this proof-of-access tool. Python and shell execution remain in the existing Docker sandbox; generated scripts do not get unrestricted network access. This feature verifies data access through a scoped HTTP endpoint; it does not remotely execute scripts on the target.

@@ -72,6 +72,7 @@ class PolicyEngine:
         "sqlmap", "ffuf", "wfuzz", "gobuster", "dirsearch", "feroxbuster",
         "nuclei", "nikto", "wpscan", "dalfox", "xsstrike", "commix",
         "ghauri", "arjun", "whatweb", "skipfish", "jaeles", "arachni",
+        "verify_lab_data_access",
     }
     STRESS_EXECUTABLES = {
         "slowhttptest", "siege", "hping3", "goldeneye", "torshammer",

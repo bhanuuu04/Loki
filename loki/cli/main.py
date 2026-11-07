@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import sys
 import os
+import secrets
 from pathlib import Path
 import uvicorn
 from rich.console import Console
@@ -149,6 +150,12 @@ def cli_entrypoint() -> None:
     setup_parser = subparsers.add_parser("setup", aliases=["onboard"], help="Interactive setup & configuration wizard")
     setup_parser.add_argument("--reset", action="store_true", help="Reset configuration and re-configure")
 
+    # Command: generate lab canary marker for a disposable test fixture
+    subparsers.add_parser(
+        "lab-canary",
+        help="Generate a unique Loki canary marker to seed into a dummy JSON record",
+    )
+
     # Command: doctor (diagnostics)
     subparsers.add_parser("doctor", help="Run platform diagnostics and system health check")
 
@@ -200,6 +207,20 @@ def cli_entrypoint() -> None:
             console.print(f"[bold green]✔ Model updated to:[/bold green] [bold cyan]{args.model_id}[/bold cyan]")
         else:
             run_model_command()
+
+    elif args.command == "lab-canary":
+        marker = f"LOKI-LAB-CANARY:{secrets.token_urlsafe(24)}"
+        console.print("[bold cyan]Loki lab canary generated[/bold cyan]")
+        console.print(f"\n[bold green]{marker}[/bold green]\n")
+        console.print("Seed this exact value into a dummy JSON record under the key 'loki_canary':")
+        console.print(
+            Panel(
+                f'{{"id": "loki-fixture-001", "loki_canary": "{marker}", "record": "dummy-lab-data"}}',
+                title="Example test fixture",
+                border_style="cyan",
+            )
+        )
+        console.print("[dim]Keep this marker out of the request URL and payload. Loki uses it only to verify retrieval.[/dim]")
 
     elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())
