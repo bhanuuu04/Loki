@@ -39,6 +39,7 @@ class AssessmentSecurityContext:
         db_manager: Optional[DatabaseManager] = None,
         assessment_store: Optional[AssessmentStore] = None,
     ):
+        self.active_assessment_id: Optional[str] = None
         self.scope_manager = scope_manager or ScopeManager(
             ScopeConfig(
                 assessment_name="Loki Assessment Session",
