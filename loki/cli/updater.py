@@ -289,18 +289,17 @@ class LokiUpdater:
                             ".",
                         ],
                         timeout=600,
-                    ) if not self.externally_managed_python else None
-                    if pip_result is not None:
-                        dependency_ok = pip_result.returncode == 0
-                        if dependency_ok:
-                            details.append("Editable install and declared dependencies refreshed.")
-                        else:
-                            detail = (
-                                pip_result.stderr or pip_result.stdout or "No pip output returned"
-                            ).strip()
-                            details.append(
-                                "Dependency refresh failed: " + detail[-1600:]
-                            )
+                    )
+                    dependency_ok = pip_result.returncode == 0
+                    if dependency_ok:
+                        details.append("Editable install and declared dependencies refreshed.")
+                    else:
+                        detail = (
+                            pip_result.stderr or pip_result.stdout or "No pip output returned"
+                        ).strip()
+                        details.append(
+                            "Dependency refresh failed: " + detail[-1600:]
+                        )
             else:
                 details.append("Dependency refresh skipped by operator.")
 
