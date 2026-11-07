@@ -159,6 +159,22 @@ def cli_entrypoint() -> None:
     # Command: doctor (diagnostics)
     subparsers.add_parser("doctor", help="Run platform diagnostics and system health check")
 
+    # Command: update (safe fast-forward from the official GitHub repository)
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update Loki from the latest official commits and repair declared dependencies",
+    )
+    update_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check whether an update is available without changing source or dependencies",
+    )
+    update_parser.add_argument(
+        "--skip-dependencies",
+        action="store_true",
+        help="Update source only; skip the pip dependency refresh",
+    )
+
     # Command: serve (starts web dashboard / API server, start alias)
     serve_parser = subparsers.add_parser("serve", aliases=["start"], help="Start the Loki API and Web UI dashboard")
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host interface")
@@ -227,6 +243,64 @@ def cli_entrypoint() -> None:
             )
         )
         console.print("[dim]Keep this marker out of the request URL and payload. Loki uses it only to verify retrieval.[/dim]")
+
+    elif args.command == "update":
+        from loki.cli.updater import LokiUpdater
+
+        updater = LokiUpdater()
+        if args.check:
+            console.print("[bold cyan]Checking the official Loki repository...[/bold cyan]")
+        else:
+            console.print("[bold cyan]Updating Loki from official main...[/bold cyan]")
+        result = updater.run(
+            check_only=args.check,
+            skip_dependencies=args.skip_dependencies,
+        )
+
+        if result.success:
+            if result.state == "update_available":
+                console.print(f"[bold yellow]Update available:[/bold yellow] {result.message}")
+            elif result.state == "up_to_date":
+                console.print(f"[bold green]✔ {result.message}[/bold green]")
+            elif result.updated:
+                console.print(f"[bold green]✔ {result.message}[/bold green]")
+            else:
+                console.print(f"[bold green]✔ {result.message}[/bold green]")
+        else:
+            console.print(Panel(
+                result.message,
+                title="[bold red]Loki update stopped[/bold red]",
+                border_style="red",
+            ))
+
+        for detail in result.details:
+            console.print(f"  • {detail}")
+        if result.current_commit:
+            console.print(f"[dim]Local commit: {result.current_commit[:12]}[/dim]")
+        if result.latest_commit:
+            console.print(f"[dim]Official main: {result.latest_commit[:12]}[/dim]")
+
+        if not result.success:
+            raise SystemExit(1)
+        if args.check:
+            return
+
+        console.print("\\n[bold cyan]Running post-update diagnostics...[/bold cyan]")
+        diagnostic_items = asyncio.run(LokiDoctor.run_diagnostics())
+        healthy = LokiDoctor.display_report(diagnostic_items)
+        if not healthy:
+            console.print(
+                "[bold yellow]The source update is installed, but diagnostics found "
+                "issues that need attention. Review the FAIL rows above; run 'loki doctor' "
+                "again after fixing them.[/bold yellow]"
+            )
+            raise SystemExit(2)
+
+        console.print("[bold green]✔ Update and diagnostics completed successfully.[/bold green]")
+        console.print(
+            "[dim]Restart Loki to load the updated code. Your .env, assessments, and local "
+            "database were not reset.[/dim]"
+        )
 
     elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())
