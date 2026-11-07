@@ -177,7 +177,8 @@ class LokiAgent:
         value = (response or "").lower()
         blocked = (
             "scope violation", "out of scope", "authorization denied",
-            "authorization error", "policy violation",
+            "authorization error", "not authorized", "permission denied",
+            "policy violation",
         )
         if any(marker in value for marker in blocked):
             return False
