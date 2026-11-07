@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -158,8 +159,7 @@ class IsolatedExecutionEngine:
     @classmethod
     def get_sanitized_env(cls, workspace_path: str) -> Dict[str, str]:
         """
-        Creates a clean, restricted environment for host process execution.
-        Strips all sensitive credentials, tokens, secrets, and API keys.
+        Legacy environment helper retained for compatibility; never used to execute model code.
         """
         forbidden_substrings = [
             "KEY", "TOKEN", "SECRET", "AUTH", "PASS", "CRED",
@@ -409,23 +409,32 @@ class IsolatedExecutionEngine:
         workspace_dir: Optional[str] = None,
     ) -> ExecutionIsolationResult:
         """
-        Synchronously execute Python code with isolation:
-        - Docker container when available.
-        - Restricted python interpreter with -I (isolated mode), -s, clean env, and process-tree termination.
+        Synchronously execute Python inside Docker only.
+        Host interpreter fallback is deliberately disabled.
+        Stdout and stderr are drained by bounded reader threads.
         """
         start_time = time.perf_counter()
         timeout = min(max(float(timeout_seconds), 1.0), 30.0)
-
         temp_dir = tempfile.mkdtemp(prefix="loki_py_ws_") if not workspace_dir else workspace_dir
         ws_path = str(Path(temp_dir).resolve())
         script_file = Path(ws_path) / "script.py"
-        script_file.write_text(code, encoding="utf-8")
 
-        # 1. DOCKER
-        if cls.is_docker_available():
-            backend = IsolationBackend.DOCKER
-            details = "Docker Sandbox (read-only root, memory/CPU capped, no network)"
-            container_name = f"loki_py_sync_{os.getpid()}_{int(time.time() * 1000)}"
+        try:
+            if not cls.is_docker_available():
+                return ExecutionIsolationResult(
+                    command=["python", "-I", str(script_file)],
+                    stdout="",
+                    stderr="Execution refused: Docker isolation is unavailable. Loki will not execute generated Python directly on the host.",
+                    exit_code=-1,
+                    timed_out=False,
+                    duration_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                    backend=IsolationBackend.UNAVAILABLE,
+                    workspace_path="",
+                    details="Fail-closed: no isolated execution backend is available.",
+                )
+
+            script_file.write_text(code, encoding="utf-8")
+            container_name = f"loki_py_sync_{os.getpid()}_{uuid.uuid4().hex[:12]}"
             docker_cmd = [
                 "docker", "run", "--rm",
                 "--name", container_name,
@@ -441,95 +450,116 @@ class IsolatedExecutionEngine:
                 "python:3-alpine",
                 "python", "-I", "/workspace/script.py",
             ]
+
+            proc = subprocess.Popen(
+                docker_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            output_limited = threading.Event()
+            termination_started = threading.Event()
+            termination_lock = threading.Lock()
+
+            def terminate_container() -> None:
+                with termination_lock:
+                    if termination_started.is_set():
+                        return
+                    termination_started.set()
+                try:
+                    subprocess.run(
+                        ["docker", "kill", container_name],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3.0,
+                        check=False,
+                    )
+                except Exception:
+                    pass
+                if proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+
+            def read_bounded(pipe) -> bytes:
+                data = bytearray()
+                try:
+                    while len(data) <= cls.MAX_OUTPUT_BYTES:
+                        remaining = cls.MAX_OUTPUT_BYTES + 1 - len(data)
+                        chunk = pipe.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        data.extend(chunk)
+                    if len(data) > cls.MAX_OUTPUT_BYTES:
+                        output_limited.set()
+                        terminate_container()
+                finally:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
+                return bytes(data[:cls.MAX_OUTPUT_BYTES])
+
+            stdout_result: Dict[str, bytes] = {}
+            stderr_result: Dict[str, bytes] = {}
+
+            def capture_stdout() -> None:
+                stdout_result["data"] = read_bounded(proc.stdout)
+
+            def capture_stderr() -> None:
+                stderr_result["data"] = read_bounded(proc.stderr)
+
+            stdout_thread = threading.Thread(target=capture_stdout, daemon=True)
+            stderr_thread = threading.Thread(target=capture_stderr, daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+
+            timed_out = False
             try:
-                res = subprocess.run(
-                    docker_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                )
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                return ExecutionIsolationResult(
-                    command=["python", "-I", str(script_file)],
-                    stdout=res.stdout,
-                    stderr=res.stderr,
-                    exit_code=res.returncode,
-                    timed_out=False,
-                    duration_ms=round(duration_ms, 2),
-                    backend=backend,
-                    workspace_path=ws_path,
-                    details=details,
-                )
+                proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                subprocess.run(["docker", "kill", container_name], capture_output=True)
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                return ExecutionIsolationResult(
-                    command=["python", "-I", str(script_file)],
-                    stdout="",
-                    stderr="Execution timed out.",
-                    exit_code=-1,
-                    timed_out=True,
-                    duration_ms=round(duration_ms, 2),
-                    backend=backend,
-                    workspace_path=ws_path,
-                    details=details,
-                )
-            except Exception as e:
-                details = f"Docker failed ({type(e).__name__}); falling back to Restricted Python"
+                timed_out = True
+                terminate_container()
+                try:
+                    proc.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2.0)
 
-        # 2. RESTRICTED PROCESS (FALLBACK)
-        backend = IsolationBackend.RESTRICTED_PROCESS
-        details = "Restricted Subprocess Sandbox (Docker unavailable: isolated mode -I, sanitized env, process-tree termination)"
-        safe_env = cls.get_sanitized_env(ws_path)
-        py_cmd = [sys.executable, "-I", "-s", str(script_file)]
+            stdout_thread.join(timeout=5.0)
+            stderr_thread.join(timeout=5.0)
+            stdout_b = stdout_result.get("data", b"")
+            stderr_b = stderr_result.get("data", b"")
 
-        try:
-            res = subprocess.run(
-                py_cmd,
-                capture_output=True,
-                text=True,
-                cwd=ws_path,
-                env=safe_env,
-                timeout=timeout,
-            )
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            if timed_out:
+                stderr_b = b"Python execution timed out; Docker container was terminated."
+            elif output_limited.is_set():
+                stderr_b = b"Output limit exceeded; Docker container was terminated."
+
             return ExecutionIsolationResult(
-                command=py_cmd,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                exit_code=res.returncode,
-                timed_out=False,
-                duration_ms=round(duration_ms, 2),
-                backend=backend,
-                workspace_path=ws_path,
-                details=details,
+                command=["python", "-I", "/workspace/script.py"],
+                stdout=cls._truncate_output(stdout_b),
+                stderr=cls._truncate_output(stderr_b),
+                exit_code=proc.returncode if proc.returncode is not None else -1,
+                timed_out=timed_out,
+                duration_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                backend=IsolationBackend.DOCKER,
+                workspace_path=ws_path if workspace_dir else "",
+                details="Docker isolation: no network, read-only root, no-new-privileges, resource limits and bounded output.",
             )
-        except subprocess.TimeoutExpired:
-            duration_ms = (time.perf_counter() - start_time) * 1000
+        except Exception as exc:
             return ExecutionIsolationResult(
-                command=py_cmd,
+                command=["python", "-I", str(script_file)],
                 stdout="",
-                stderr="Python execution timed out.",
-                exit_code=-1,
-                timed_out=True,
-                duration_ms=round(duration_ms, 2),
-                backend=backend,
-                workspace_path=ws_path,
-                details=details,
-            )
-        except Exception as e:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            return ExecutionIsolationResult(
-                command=py_cmd,
-                stdout="",
-                stderr=f"Restricted Python execution error: {type(e).__name__}: {str(e)}",
+                stderr=f"Docker isolated Python execution failed: {type(exc).__name__}: {exc}. Host fallback is disabled.",
                 exit_code=-1,
                 timed_out=False,
-                duration_ms=round(duration_ms, 2),
-                backend=backend,
-                workspace_path=ws_path,
-                details=details,
+                duration_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                backend=IsolationBackend.UNAVAILABLE,
+                workspace_path="",
+                details="Fail-closed: Docker execution failed; no host fallback is permitted.",
             )
         finally:
             if not workspace_dir:
                 shutil.rmtree(ws_path, ignore_errors=True)
+
