@@ -220,3 +220,26 @@ A matrix test workflow is configured in `.github/workflows/ci.yml` that automati
 python -m pytest -v
 ```
 All unit and integration test cases pass natively.
+
+
+## Security configuration and isolated execution
+
+Loki deliberately separates model-callable assessment tools from operator-only scope controls.
+
+Before configuring an assessment, provision a long, random operator token and a separate signing key. Both must be at least 32 bytes. Generate independent values with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Set these environment variables in the trusted application environment (never in the model prompt or assessment context):
+
+- `LOKI_OPERATOR_TOKEN`: required by the trusted `configure_scope(..., operator_token=...)` API and by `OperatorAuthorizationManager.issue_ticket(..., operator_token=...)`.
+- `LOKI_AUTH_SIGNING_KEY`: required to sign and verify operator authorization tickets. There is no built-in default key.
+- `LOKI_AUTH_REVOCATION_FILE`: optional path for the durable ticket-revocation JSON store. By default Loki uses `~/.loki/revoked_tickets.json`.
+
+Scope configuration and ticket issuance are operator-side application operations; they are not exposed as LLM-callable tools. Tickets are bound to an active assessment and must cover the requested target.
+
+**Docker is required for generated shell and Python execution.** Loki refuses these operations if the Docker daemon is unavailable or a container cannot be started. It does not fall back to running generated shell commands or Python code directly on the host. Generated Python containers have networking disabled; shell containers also default to networking disabled.
+
+Do not place operator tokens, signing keys, passwords, bearer tokens, or session cookies in prompts or tool arguments. Store secrets in a protected environment or secrets manager.
