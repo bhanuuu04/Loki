@@ -58,7 +58,7 @@ def _write_private_file(path: Path, values: Dict[str, str]) -> None:
     if os.name != "nt":
         os.chmod(path.parent, 0o700)
 
-    lines = [f"{key}={values[key]}\n" for key in SECURITY_ENV_KEYS]
+    lines = [f"{key}={values[key]}\n" for key in SECURITY_ENV_KEYS if key in values]
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
