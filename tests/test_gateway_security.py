@@ -176,7 +176,10 @@ async def test_scope_synchronization_active_agent_session():
     assert "Scope Violation" in res_init.output
 
     # Configure scope during active session
-    configure_scope(targets=["corp-target.net", "127.0.0.1"], assessment_name="Corp Audit")
+    from loki.config import settings
+    operator_token = "test-operator-token-with-at-least-32-bytes"
+    settings.operator_token = operator_token
+    configure_scope(targets=["corp-target.net", "127.0.0.1"], assessment_name="Corp Audit", operator_token=operator_token)
 
     # The existing agent instance must now immediately allow corp-target.net
     assert agent.gateway.scope_manager.config.assessment_name == "Corp Audit"
@@ -189,6 +192,8 @@ def test_operator_authorization_rejects_arbitrary_tokens():
     from loki.tools.security_tools import authorize_target
 
     AssessmentSecurityContext.reset_default()
+    from loki.config import settings
+    settings.operator_token = "test-operator-token-with-at-least-32-bytes"
 
     # Pass arbitrary token
     res = authorize_target("evil-unauthorized-host.org", authorization_token="any_random_token_123")
@@ -230,17 +235,25 @@ async def test_nested_and_percent_encoded_target_extraction(clean_gateway):
     assert "Scope Violation" in res_encoded.output
 
 
-def test_signed_operator_ticket_authorization():
+def test_signed_operator_ticket_authorization(monkeypatch, tmp_path):
     """Verify cryptographically signed operator ticket authorizes targets, while tampered tickets fail."""
     from loki.security.authorization import OperatorAuthorizationManager
     from loki.security.context import AssessmentSecurityContext
     from loki.tools.security_tools import authorize_target
 
-    AssessmentSecurityContext.reset_default()
+    ctx = AssessmentSecurityContext.reset_default()
+    monkeypatch.setenv("LOKI_AUTH_SIGNING_KEY", "test-signing-key-with-at-least-32-bytes")
+    monkeypatch.setenv("LOKI_AUTH_REVOCATION_FILE", str(tmp_path / "revoked.json"))
+    operator_token = "test-operator-token-with-at-least-32-bytes"
+    from loki.config import settings
+    settings.operator_token = operator_token
+    from loki.tools.security_tools import configure_scope
+    configure_scope(targets=["127.0.0.1"], assessment_name="Ticket Audit", operator_token=operator_token)
+    active_assessment_id = ctx.active_assessment_id
 
     # 1. Generate valid signed operator ticket
     valid_ticket = OperatorAuthorizationManager.issue_ticket(
-        assessment_id="audit_2026",
+        assessment_id=active_assessment_id,
         approved_targets=["new-approved-asset.com"],
         valid_seconds=3600.0,
         operator="security_lead",
@@ -261,7 +274,7 @@ def test_signed_operator_ticket_authorization():
     ticket_id = payload_dict["ticket_id"]
 
     OperatorAuthorizationManager.revoke_ticket(ticket_id, reason="Operator emergency revocation")
-    is_valid, reason, _ = OperatorAuthorizationManager.verify_ticket(valid_ticket)
+    is_valid, reason, _ = OperatorAuthorizationManager.verify_ticket(valid_ticket, assessment_id=active_assessment_id)
     assert not is_valid
     assert "revoked" in reason.lower()
 
@@ -286,3 +299,69 @@ async def test_dynamic_target_revocation_enforced_by_gateway(clean_gateway):
     res_revoked = await clean_gateway.execute(call_revoked, ping_target)
     assert res_revoked.is_error
     assert "Scope Violation" in res_revoked.output
+
+
+def test_scope_mutation_tools_are_not_exposed_to_the_agent():
+    from loki.runtime.agent import LokiAgent
+    agent = LokiAgent(provider="mock")
+    assert agent.registry.get("configure_assessment_scope") is None
+    assert agent.registry.get("authorize_target") is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_operator_only_scope_mutator(clean_gateway):
+    @tool(name="configure_assessment_scope", description="Operator-only scope mutation")
+    def fake_scope_mutator(targets: str) -> str:
+        return "should never execute"
+    call = ToolCall(id="operator-control-call", name="configure_assessment_scope",
+                    arguments={"targets": "evil.example"})
+    result = await clean_gateway.execute(call, fake_scope_mutator)
+    assert result.is_error
+    assert "operator-only" in result.output.lower()
+
+
+def test_signed_ticket_requires_assessment_binding(monkeypatch, tmp_path):
+    from loki.security.authorization import OperatorAuthorizationManager
+    monkeypatch.setenv("LOKI_AUTH_SIGNING_KEY", "test-signing-key-with-at-least-32-bytes")
+    monkeypatch.setenv("LOKI_AUTH_REVOCATION_FILE", str(tmp_path / "revoked.json"))
+    token = OperatorAuthorizationManager.issue_ticket("assessment-one", ["example.com"])
+    valid, reason, _ = OperatorAuthorizationManager.verify_ticket(
+        token, assessment_id="assessment-two", target="example.com"
+    )
+    assert not valid
+    assert "active assessment" in reason.lower()
+
+
+def test_signing_fails_without_explicit_secret(monkeypatch):
+    from loki.security.authorization import OperatorAuthorizationManager
+    monkeypatch.delenv("LOKI_AUTH_SIGNING_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="LOKI_AUTH_SIGNING_KEY"):
+        OperatorAuthorizationManager.issue_ticket("assessment-one", ["example.com"])
+
+
+def test_ticket_revocation_persists_to_disk(monkeypatch, tmp_path):
+    import base64, json
+    from loki.security.authorization import OperatorAuthorizationManager
+    monkeypatch.setenv("LOKI_AUTH_SIGNING_KEY", "test-signing-key-with-at-least-32-bytes")
+    monkeypatch.setenv("LOKI_AUTH_REVOCATION_FILE", str(tmp_path / "revoked.json"))
+    token = OperatorAuthorizationManager.issue_ticket("assessment-one", ["example.com"])
+    payload = json.loads(base64.urlsafe_b64decode(token.split(".", 1)[0] + "==").decode())
+    OperatorAuthorizationManager.revoke_ticket(payload["ticket_id"], "test revocation")
+    valid, reason, _ = OperatorAuthorizationManager.verify_ticket(
+        token, assessment_id="assessment-one", target="example.com"
+    )
+    assert not valid
+    assert "revoked" in reason.lower()
+
+
+def test_human_approval_metadata_is_enforced(clean_gateway):
+    from loki.tools.base import ToolMetadata
+    @tool(name="dangerous_tool", description="Requires operator approval",
+          metadata=ToolMetadata(tool_name="dangerous_tool", requires_human_approval=True))
+    def dangerous_tool() -> str:
+        return "should never execute"
+    call = ToolCall(id="approval-required", name="dangerous_tool", arguments={})
+    import asyncio
+    result = asyncio.run(clean_gateway.execute(call, dangerous_tool))
+    assert result.is_error
+    assert result.metadata.get("requires_human_approval") is True
