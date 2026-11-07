@@ -18,6 +18,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from loki.config import settings
+
 
 class OperatorAuthorizationTicket(BaseModel):
     ticket_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -100,8 +102,17 @@ class OperatorAuthorizationManager:
         approved_targets: List[str],
         valid_seconds: float = 3600.0,
         operator: str = "operator",
+        operator_token: Optional[str] = None,
     ) -> str:
-        """Create a short-lived ticket bound to one assessment and its approved targets."""
+        """Create a ticket only after validating the independently provisioned operator credential."""
+        expected_operator_token = settings.operator_token
+        if (
+            not expected_operator_token
+            or len(expected_operator_token.encode("utf-8")) < 32
+            or not operator_token
+            or not hmac.compare_digest(operator_token, expected_operator_token)
+        ):
+            raise PermissionError("Valid LOKI_OPERATOR_TOKEN is required to issue authorization tickets.")
         if not assessment_id or not assessment_id.strip():
             raise ValueError("assessment_id is required.")
         if not operator or not operator.strip():
