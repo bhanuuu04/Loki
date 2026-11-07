@@ -230,7 +230,13 @@ def check_scope(target: str) -> str:
 def search_tools(query: str) -> str:
     """Find relevant tools, prioritizing methods with stronger historical outcomes."""
     task_type = classify_task(query)
+    task_type = classify_task(query)
     curated = tool_catalog.search_by_objective(query)
+    curated_names = tool_performance_memory.rank_tool_names(
+        task_type, [entry.name for entry in curated]
+    )
+    curated_by_name = {entry.name: entry for entry in curated}
+    curated = [curated_by_name[name] for name in curated_names]
     results = []
     for entry in curated[:5]:
         status = "[INSTALLED ON HOST]" if entry.is_installed else "[NOT DETECTED ON HOST]"
