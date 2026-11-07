@@ -346,6 +346,13 @@ class IsolatedExecutionEngine:
                 )
 
             script_file.write_text(code, encoding="utf-8")
+            # Rootless Docker maps container root to an unprivileged host UID.
+            # Let that mapped UID traverse the random temporary directory and read
+            # the generated script; the directory is removed immediately afterwards.
+            if not workspace_dir and os.name != "nt":
+                os.chmod(ws_path, 0o711)
+                os.chmod(script_file, 0o644)
+
             container_name = f"loki_python_{os.getpid()}_{uuid.uuid4().hex[:12]}"
             docker_cmd = [
                 "docker", "run", "--rm",
@@ -436,6 +443,10 @@ class IsolatedExecutionEngine:
                 )
 
             script_file.write_text(code, encoding="utf-8")
+            if not workspace_dir and os.name != "nt":
+                os.chmod(ws_path, 0o711)
+                os.chmod(script_file, 0o644)
+
             container_name = f"loki_py_sync_{os.getpid()}_{uuid.uuid4().hex[:12]}"
             docker_cmd = [
                 "docker", "run", "--rm",
