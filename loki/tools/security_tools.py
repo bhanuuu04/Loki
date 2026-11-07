@@ -473,8 +473,8 @@ async def dns_lookup(domain: str) -> str:
     description=(
         "In NOMERCY + operator-enabled LAB mode, perform one scoped HTTP GET to verify "
         "whether a seeded dummy-data canary record is actually retrievable. Optionally "
-        "inject ONE supplied payload into ONE query parameter. A compromise is confirmed "
-        "only when JSON contains an exact LOKI-LAB-CANARY marker in a canary field. "
+        "inject ONE supplied payload into ONE query parameter after a no-payload control GET. An injection is confirmed "
+        "only when JSON contains an exact LOKI-LAB-CANARY marker in a canary field in the injected response, and not in the control response. "
         "Returns only the matching sanitized fixture record, not arbitrary response data. "
         "No redirects, cookies, auth headers, non-JSON dumps, or unbounded responses."
     ),
