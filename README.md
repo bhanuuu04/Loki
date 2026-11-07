@@ -497,9 +497,18 @@ A direct canary match proves that the seeded record was retrievable. It does **n
 | `loki doctor` | Check dependencies and platform readiness |
 | `loki start` | Start the local Web UI and API |
 | `loki run "your prompt"` | Run one prompt and exit |
-| `loki model` | Select or inspect the AI model |
-| `loki tools --sync-kali` | Download and cache the official Kali catalogue |
-| `loki lab-canary` | Generate a marker for a disposable test fixture |
+| `loki tools` | List registered runtime tools and Kali catalogue status |
+| `loki tools --sync-kali` | Sync Kali's official All Tools catalogue |
+| `loki tools --search "port scanning"` | Search the Kali catalogue by task or tool name |
+| `loki tools --installed-only` | List catalogue entries whose binaries are detected on the host |
+| `loki tools --details nmap` | Inspect a tool, package, aliases, and documentation |
+| `loki model` | Open the model selector |
+| `loki model --list --provider nvidia` | List models from a provider |
+| `loki model --test --provider nvidia` | Test provider compatibility |
+| `loki eval path/to/suite.json` | Run a benchmark suite |
+| `loki config` | Inspect active configuration |
+| `loki lab-canary` | Generate a lab fixture marker |
+| `loki --version` | Print the installed version |
 
 The updater refuses to modify a dirty working tree, a non-`main` branch, a non-official `origin`, or diverged local history. It never runs `reset --hard`, force-checks out a branch, or stashes local work. Commit or stash local changes yourself before updating. If diagnostics still find a problem, the command reports it rather than claiming it has repaired arbitrary application bugs.
 
