@@ -547,17 +547,51 @@ async def verify_lab_data_access(
         return f"Lab data verification refused: TCP port {port} is not in the operator-approved port list."
 
     request_url = url
+    control_url = url
     if parameter is not None and payload is not None:
-        query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != parameter]
-        query.append((parameter, payload))
+        # Build a control URL with the tested parameter removed. A positive
+        # control means the canary was already accessible without the payload.
+        control_query = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key != parameter
+        ]
+        control_url = urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", urlencode(control_query), "")
+        )
+        injected_query = list(control_query)
+        injected_query.append((parameter, payload))
         request_url = urlunsplit(
-            (parsed.scheme, parsed.netloc, parsed.path or "/", urlencode(query), "")
+            (parsed.scheme, parsed.netloc, parsed.path or "/", urlencode(injected_query), "")
         )
 
     endpoint_label = urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", "", ""))
-    response_body = bytearray()
+
+    async def _fetch_json_fixture(client: httpx.AsyncClient, request_target: str):
+        body = bytearray()
+        async with client.stream(
+            "GET",
+            request_target,
+            headers={"Accept": "application/json"},
+        ) as response:
+            status = response.status_code
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if 300 <= status < 400:
+                return status, None, "redirect"
+            if content_type not in ("application/json", "application/problem+json", "text/json"):
+                return status, None, "non_json"
+            if status < 200 or status >= 300:
+                return status, None, "http_error"
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > 65536:
+                    return status, None, "oversized"
+            return status, bytes(body), None
+
     status_code = None
-    content_type = ""
+    response_body = b""
+    control_status = None
+    control_hash = None
     try:
         timeout = httpx.Timeout(8.0, connect=3.0)
         limits = httpx.Limits(max_connections=1, max_keepalive_connections=0)
@@ -568,29 +602,39 @@ async def verify_lab_data_access(
             trust_env=False,
             limits=limits,
         ) as client:
-            async with client.stream(
-                "GET",
-                request_url,
-                headers={"Accept": "application/json"},
-            ) as response:
-                status_code = response.status_code
-                content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                if 300 <= status_code < 400:
+            if parameter is not None and payload is not None:
+                control_status, control_body, control_error = await _fetch_json_fixture(client, control_url)
+                if control_error:
                     return (
-                        f"INCONCLUSIVE: target returned HTTP {status_code}; redirects are disabled "
-                        "so Loki will not follow a second destination."
+                        f"INCONCLUSIVE: the no-payload control request could not be compared "
+                        f"(HTTP {control_status}, reason={control_error}). No exploit claim was made."
                     )
-                if status_code < 200 or status_code >= 300:
-                    return f"NOT VERIFIED: target returned HTTP {status_code}; no canary record was confirmed."
-                if content_type not in ("application/json", "application/problem+json", "text/json"):
+                control_hash = hashlib.sha256(control_body).hexdigest()
+                control_records = extract_canary_records(control_body, canary_marker)
+                if control_records:
                     return (
-                        f"INCONCLUSIVE: response Content-Type is '{content_type or 'missing'}', not JSON. "
-                        "Loki will not inspect or dump HTML, files, or arbitrary response bodies."
+                        "DATA ACCESS FOUND WITHOUT THE TEST PAYLOAD — INJECTION NOT VERIFIED.\n"
+                        f"Target: {parsed.hostname}\nHTTP status: {control_status}\n"
+                        f"Canary record: {json.dumps(control_records[0], ensure_ascii=False)}\n"
+                        "The seeded record was already returned by the control request, so the supplied "
+                        "payload has not been shown to cause access."
                     )
-                async for chunk in response.aiter_bytes():
-                    response_body.extend(chunk)
-                    if len(response_body) > 65536:
-                        return "INCONCLUSIVE: response exceeded Loki's 64 KiB proof-of-access limit."
+
+            status_code, response_body, fetch_error = await _fetch_json_fixture(client, request_url)
+            if fetch_error == "redirect":
+                return (
+                    f"INCONCLUSIVE: target returned HTTP {status_code}; redirects are disabled "
+                    "so Loki will not follow a second destination."
+                )
+            if fetch_error == "http_error":
+                return f"NOT VERIFIED: target returned HTTP {status_code}; no canary record was confirmed."
+            if fetch_error == "non_json":
+                return (
+                    "INCONCLUSIVE: response Content-Type was not JSON. "
+                    "Loki will not inspect or dump HTML, files, or arbitrary response bodies."
+                )
+            if fetch_error == "oversized":
+                return "INCONCLUSIVE: response exceeded Loki's 64 KiB proof-of-access limit."
     except httpx.TimeoutException:
         return "INCONCLUSIVE: the scoped lab request timed out after 8 seconds."
     except httpx.HTTPError as exc:
@@ -602,7 +646,7 @@ async def verify_lab_data_access(
     if not still_allowed:
         return f"NOT VERIFIED: scope changed during the request. {post_reason}"
 
-    records = extract_canary_records(bytes(response_body), canary_marker)
+    records = extract_canary_records(response_body, canary_marker)
     if not records:
         return (
             "NOT VERIFIED: the response did not contain a JSON object with an exact seeded canary "
@@ -610,6 +654,120 @@ async def verify_lab_data_access(
             "A reflected payload, status code, or generic SQL error is not proof of data access."
         )
 
+    matched_record = records[0]
+    response_hash = hashlib.sha256(response_body).hexdigest()
+
+    if parameter is None:
+        return (
+            "DATA ACCESS CONFIRMED — EXPLOITABILITY NOT VERIFIED.\n"
+            f"Target: {parsed.hostname}\nHTTP status: {status_code}\n"
+            f"Canary record: {json.dumps(matched_record, ensure_ascii=False)}\n"
+            f"Response SHA-256: {response_hash}\n"
+            "The seeded record was retrieved, but no payload/control comparison was performed. "
+            "Loki has not labelled this an injection vulnerability."
+        )
+
+    evidence_payload = {
+        "verification": "confirmed_payload_caused_lab_canary_access",
+        "endpoint": endpoint_label,
+        "http_status": status_code,
+        "control_http_status": control_status,
+        "control_response_sha256": control_hash,
+        "canary_marker": canary_marker,
+        "matched_record": matched_record,
+        "response_sha256": response_hash,
+        "control_canary_present": False,
+        "request_method": "GET",
+        "payload_parameter": parameter,
+        "payload_injected": True,
+    }
+    evidence_text = json.dumps(evidence_payload, sort_keys=True, ensure_ascii=False)
+    finding_id = "LAB-CANARY-" + hashlib.sha256(
+        f"{endpoint_label}|{canary_marker}|{parameter}|{payload}".encode("utf-8")
+    ).hexdigest()[:16].upper()
+
+    evidence_record_id = None
+    try:
+        evidence_record_id = ctx.assessment_store.index_evidence(
+            session_id=ctx.active_assessment_id,
+            tool_name="verify_lab_data_access",
+            raw_output=evidence_text,
+            command_args=[
+                f"endpoint={endpoint_label}",
+                "method=GET",
+                f"payload_parameter={parameter}",
+                "control_canary_present=False",
+            ],
+            metadata={
+                "proof_type": "payload_caused_seeded_lab_canary_access",
+                "control_response_sha256": control_hash,
+                "response_sha256": response_hash,
+                "http_status": status_code,
+            },
+        )
+    except Exception:
+        evidence_record_id = None
+
+    finding = SecurityFinding(
+        finding_id=finding_id,
+        title="Test payload exposed a seeded lab data record",
+        description=(
+            "The no-payload control response did not contain the operator-seeded canary record, "
+            "while the one-parameter test request did. This is evidence that the supplied test input "
+            "caused access to the seeded lab fixture. It does not imply access to unrelated or production data."
+        ),
+        affected_asset=parsed.hostname,
+        affected_endpoint=endpoint_label,
+        category="Verified Lab Data Exposure",
+        cwe_id="CWE-200",
+        cvss_score=7.5,
+        severity=SeverityLevel.HIGH,
+        confidence=ConfidenceLevel.CONFIRMED,
+        lifecycle=FindingLifecycle.CONFIRMED,
+        source=FindingSource.TOOL_CONFIRMED,
+        assessment_id=ctx.active_assessment_id,
+        evidence_record_id=str(evidence_record_id) if evidence_record_id else None,
+        evidence_provenance=(
+            "Two scoped HTTP GET requests: control without tested parameter contained no canary; "
+            "single-parameter payload request returned the exact seeded JSON canary."
+        ),
+        evidence=json.dumps(matched_record, sort_keys=True, ensure_ascii=False),
+        evidence_hash=response_hash,
+        reproduction=ReproductionRecord(
+            method="GET",
+            url=endpoint_label,
+            payload=payload,
+            expected_behavior="No canary record in the control response; exact seeded canary record in the injected response.",
+            observed_behavior=(
+                f"Control HTTP {control_status}: no canary. "
+                f"Injected HTTP {status_code}: exact canary field found."
+            ),
+            response_status=status_code,
+            response_evidence_snippet=json.dumps(matched_record, sort_keys=True, ensure_ascii=False)[:1000],
+            reproduced_successfully=True,
+        ),
+        remediation=(
+            "Restrict the vulnerable endpoint/query to authorized records, use parameterized queries, "
+            "enforce object-level authorization, and prevent untrusted input from selecting arbitrary rows."
+        ),
+    )
+    try:
+        ctx.assessment_store.add_finding(ctx.active_assessment_id, finding)
+    except Exception as exc:
+        return (
+            "VERIFIED: the payload/control comparison confirmed access to the seeded canary record, but "
+            f"Loki could not persist the finding ({type(exc).__name__}). Record evidence hash: {response_hash}"
+        )
+
+    return (
+        "INJECTION VERIFIED — SEEDED LAB DATA ACCESS CONFIRMED.\n"
+        f"Target: {parsed.hostname}\nControl HTTP status: {control_status} (canary absent)\n"
+        f"Payload HTTP status: {status_code} (canary present)\n"
+        f"Canary record: {json.dumps(matched_record, ensure_ascii=False)}\n"
+        f"Response SHA-256: {response_hash}\n"
+        f"Assessment finding: {finding_id}\n"
+        "Only the matched canary fixture was returned; other response data was not extracted."
+    )
     matched_record = records[0]
     response_hash = hashlib.sha256(bytes(response_body)).hexdigest()
     evidence_payload = {
