@@ -113,21 +113,45 @@ class PolicyEngine:
 
     @classmethod
     def _command_tokens(cls, tool_name: str, args: List[str]) -> List[str]:
+        """Extract executable tokens without treating arbitrary tool data as shell syntax.
+
+        Only shell-command tools are parsed as command lines. Python source, URLs,
+        payloads, query values, and other free-form tool arguments are not shell
+        commands and may legitimately contain unmatched quote characters.
+        """
         tokens: List[str] = []
-        if tool_name.lower() == "run_command":
-            command = next((item.split("=", 1)[1] for item in args if item.startswith("command=")), "")
+        shell_tools = {"run_command", "shell_exec", "bash"}
+        if tool_name.lower() in shell_tools:
+            command = next(
+                (
+                    item.split("=", 1)[1]
+                    for item in args
+                    if "=" in item
+                    and item.split("=", 1)[0].lower() in {"command", "cmd", "shell_command"}
+                ),
+                "",
+            )
             if command:
                 try:
                     tokens = shlex.split(command, posix=os.name != "nt")
                 except ValueError:
+                    # Preserve risk classification even when command quoting is malformed.
+                    # The isolated shell will return the syntax error to the agent.
                     tokens = command.split()
         else:
+            # A non-shell tool is classified by its registered tool name. Parse only
+            # explicitly command-shaped fields, never code/payload/query/body strings.
             tokens = [tool_name]
             for item in args:
-                if "=" in item:
-                    tokens.extend(shlex.split(item.split("=", 1)[1])[:32])
-                else:
-                    tokens.append(item)
+                if "=" not in item:
+                    continue
+                key, value = item.split("=", 1)
+                if key.lower() not in {"command", "cmd", "shell_command", "executable", "argv"}:
+                    continue
+                try:
+                    tokens.extend(shlex.split(value, posix=os.name != "nt")[:32])
+                except ValueError:
+                    tokens.extend(value.split()[:32])
 
         # Skip benign wrappers so "sudo hydra ..." is still classified as brute force.
         while tokens and os.path.basename(tokens[0]).lower().removesuffix(".exe") in cls.WRAPPER_EXECUTABLES:

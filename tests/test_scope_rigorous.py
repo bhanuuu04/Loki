@@ -141,3 +141,22 @@ def test_model_self_authorization_is_blocked():
     res = authorize_target("unauthorized-domain.com")
     assert "Authorization Denied" in res
     assert "Autonomous self-authorization by the model is disabled" in res
+
+
+def test_dns_observed_ip_is_explained_but_not_authorized_for_direct_testing(monkeypatch):
+    import ipaddress
+
+    scope = ScopeManager(
+        ScopeConfig(
+            assessment_name="DNS Observation Scope",
+            targets=["example.com"],
+            allow_subdomains=True,
+        )
+    )
+    observed_ip = ipaddress.ip_address("203.0.113.17")
+    monkeypatch.setattr(scope, "_resolve_host", lambda _host: [observed_ip])
+
+    assert scope.dns_observation_owner("203.0.113.17") == "example.com"
+    # Observation of a domain's DNS answer does not authorize direct IP testing.
+    allowed, _ = scope.is_in_scope("203.0.113.17", check_dns=False)
+    assert not allowed

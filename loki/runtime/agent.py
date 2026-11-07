@@ -55,7 +55,7 @@ Operational Rules:
 9. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
 10. Goal-driven investigations: Treat requests to find, identify, locate, fingerprint, or enumerate something as an objective, not a one-tool task. A failed tool is one observation, not a reason to stop. When the objective is unresolved, try a materially different authorized method, avoid repeating the same failed method without a new hypothesis, and use the remaining run budget. Keep a short method ledger with the tool, what it established, and what it did not establish. Distinguish a method that returned no data from a method that was blocked by policy.
 11. Learned tool effectiveness: Use the task-specific effectiveness memory in the live system context. Rank historically successful tools earlier for similar objectives, but treat the score as a hint rather than proof. Update the memory from every tool result. A useful result should increase priority; repeated no-result/error outcomes should lower priority. New tools start neutral. Never store or expose raw tool output, target names, prompts, or credentials in the learning memory.
-12. Origin IP and CDN handling: For an origin-IP request, distinguish an ordinary DNS answer and a CDN edge IP from an independently verified origin address. Use only in-scope DNS observations and owner-provided DNS-zone, CDN, hosting, or cloud asset inventory. If a CDN is in front, do not attempt to bypass it, mine leaked origin databases, exploit misconfigurations, brute-force virtual hosts, or probe candidate origin IPs. If owner-controlled inventory is not available, say the origin is not verified; continue only with safe adjacent facts such as CDN/provider identification, public DNS records, certificate names, and in-scope technology metadata.
+12. Origin IP and CDN handling: For an origin-IP request, distinguish an ordinary DNS answer and a CDN edge IP from an independently verified origin address. Use only in-scope DNS observations and owner-provided DNS-zone, CDN, hosting, or cloud asset inventory. A resolved IP is a DNS observation, not automatic authorization for direct IP testing and never proof of origin. Do not repeatedly call check_scope_authorization on every A/AAAA answer just to report DNS. If a CDN is in front, label the visible addresses as CDN edge addresses and do not attempt to bypass it, mine leaked origin databases, exploit misconfigurations, brute-force virtual hosts, or probe candidate origin IPs. Do not use python_exec for live network research because its container is network-disabled. If owner-controlled inventory is not available, say the origin is not verified; continue only with safe adjacent facts such as CDN/provider identification, public DNS records, certificate names, and in-scope technology metadata.
 13. Additional useful information: Prioritize the exact question first. Once it is answered or no further safe method exists, include concise relevant side findings (for example DNS/NS/MX/TXT observations, certificate names, server headers, technology fingerprints, and in-scope subdomains). Label observations, inferences, and verified facts separately.
 14. Network and execution boundaries: The generic run_command shell runs inside the configured Docker image with networking disabled. Do not use it for live remote scanning or claim that it reached a target. Use a dedicated network-capable tool that enforces active scope, or explain when the requested tool is not yet supported by a scoped network adapter. Never weaken sandbox networking or scope controls to make a tool work.
 15. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
@@ -137,6 +137,22 @@ class LokiAgent:
         self.security_context = current_context
         self.gateway = current_context.gateway
         self.registry.set_gateway(self.gateway)
+
+    async def _execute_tool_call(self, tool_call: ToolCall) -> ToolResult:
+        """Execute one tool without allowing a tool exception to abort the whole run."""
+        try:
+            return await self.registry.execute_call(tool_call)
+        except Exception as exc:
+            return ToolResult(
+                call_id=tool_call.id,
+                tool_name=tool_call.name,
+                output=(
+                    f"Tool execution failed safely: {type(exc).__name__}: {exc}. "
+                    "The agent run remains active; inspect this error and choose a safe alternative."
+                ),
+                is_error=True,
+                metadata={"authorized": False, "execution_exception": True},
+            )
 
     def _persist_tool_evidence(self, tool_call: ToolCall, result: ToolResult) -> None:
         """Index bounded, redacted output from successful scoped tool executions."""
@@ -418,7 +434,7 @@ class LokiAgent:
                         )
 
                         # Execute tool through the existing policy/scope gateway.
-                        t_res = await self.registry.execute_call(tc)
+                        t_res = await self._execute_tool_call(tc)
                         self._persist_tool_evidence(tc, t_res)
                         tool_results.append(t_res)
 
