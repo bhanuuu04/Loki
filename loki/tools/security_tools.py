@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import json
 import re
-import secrets
 import socket
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
