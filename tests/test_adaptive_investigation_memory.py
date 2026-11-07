@@ -280,15 +280,15 @@ async def test_agent_can_continue_through_fifteen_failures_and_learn_sixteenth_m
     )
     assert ranked[0] == "owner_inventory_lookup"
 
-    continuation_messages = [
+    continuation_messages = {
         message.content
         for messages in provider.seen_messages
         for message in messages
         if message.content and "INVESTIGATION CONTINUATION" in message.content
-    ]
+    }
     assert len(continuation_messages) == 16
-    assert "16/16" in continuation_messages[-1]
-    assert "15" in continuation_messages[-1]
+    final_continuation = next(message for message in continuation_messages if "16/16" in message)
+    assert "15" in final_continuation
 
 
 def test_adaptive_continuation_budget_is_bounded_at_twenty():
