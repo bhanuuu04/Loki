@@ -291,6 +291,16 @@ async def test_agent_can_continue_through_fifteen_failures_and_learn_sixteenth_m
     assert "15" in final_continuation
 
 
+def test_default_step_budget_supports_sixteen_adaptive_methods(monkeypatch):
+    from loki.config import LokiConfig
+
+    monkeypatch.delenv("LOKI_MAX_STEPS", raising=False)
+    monkeypatch.delenv("LOKI_MAX_ADAPTIVE_CONTINUATIONS", raising=False)
+    config = LokiConfig()
+    assert config.max_steps == 40
+    assert config.max_adaptive_continuations == 16
+
+
 def test_adaptive_continuation_budget_is_bounded_at_twenty():
     agent = LokiAgent(
         provider="mock",

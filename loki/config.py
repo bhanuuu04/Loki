@@ -19,7 +19,7 @@ class LokiConfig(BaseModel):
     default_provider: str = Field(default_factory=lambda: os.getenv("LOKI_PROVIDER", "mock"))
     default_model: str = Field(default_factory=lambda: os.getenv("LOKI_MODEL", "mock-agent-v1"))
     temperature: float = Field(default_factory=lambda: float(os.getenv("LOKI_TEMPERATURE", "0.2")))
-    max_steps: int = Field(default_factory=lambda: int(os.getenv("LOKI_MAX_STEPS", "25")))
+    max_steps: int = Field(default_factory=lambda: int(os.getenv("LOKI_MAX_STEPS", "40")))
     max_adaptive_continuations: int = Field(
         default_factory=lambda: int(os.getenv("LOKI_MAX_ADAPTIVE_CONTINUATIONS", "16"))
     )

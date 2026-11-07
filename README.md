@@ -240,7 +240,7 @@ Loki now treats information-finding requests as objectives rather than one-shot 
 The continuation budget is bounded. Configure it in `.env`:
 
 ```env
-LOKI_MAX_STEPS=25
+LOKI_MAX_STEPS=40
 LOKI_MAX_ADAPTIVE_CONTINUATIONS=16
 ```
 
