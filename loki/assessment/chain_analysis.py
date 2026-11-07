@@ -79,6 +79,9 @@ def _evidence_is_anchored(
     if not record:
         return False
 
+    record_metadata = record.get("metadata") or {}
+    if record_metadata.get("authorized") is not True:
+        return False
     raw_output = str(record.get("raw_output") or "")
     output_hash = str(record.get("output_hash") or "")
     evidence_hash = hashlib.sha256(raw_output.encode("utf-8", errors="replace")).hexdigest()
