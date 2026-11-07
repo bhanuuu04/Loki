@@ -8,6 +8,14 @@ from loki.security.context import AssessmentSecurityContext
 from loki.types import LLMResponse, Role, TokenUsage
 
 
+@pytest.fixture(autouse=True)
+def restore_default_assessment_context():
+    """Keep these tests from leaking a replacement singleton into other tests."""
+    original_context = AssessmentSecurityContext.get_default()
+    yield
+    AssessmentSecurityContext.reset_default(original_context)
+
+
 class CapturingProvider:
     """Minimal provider that records the exact messages Loki sends to its model."""
 
