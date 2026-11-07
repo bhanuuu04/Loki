@@ -35,6 +35,7 @@ from loki.types import (
     RunResult,
     RunStatus,
     TokenUsage,
+    ToolCall,
     ToolResult,
 )
 
