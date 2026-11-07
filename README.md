@@ -241,16 +241,16 @@ The continuation budget is bounded. Configure it in `.env`:
 
 ```env
 LOKI_MAX_STEPS=25
-LOKI_MAX_ADAPTIVE_CONTINUATIONS=8
+LOKI_MAX_ADAPTIVE_CONTINUATIONS=16
 ```
 
-The adaptive continuation setting accepts 0–12. Setting it to 0 disables automatic follow-up cycles. The overall run still obeys `LOKI_MAX_STEPS`, scope checks, execution policy, and tool-specific restrictions.
+The adaptive continuation setting accepts 0–20 and defaults to 16. Setting it to 0 disables automatic follow-up cycles. This is enough headroom for workflows where many distinct sources fail before a later method succeeds; the overall step budget still applies. The overall run still obeys `LOKI_MAX_STEPS`, scope checks, execution policy, and tool-specific restrictions.
 
 ### Persistent tool-effectiveness memory
 
 Loki learns which methods are more useful for similar task categories. For example, if several DNS methods return no data but an approved asset-inventory lookup provides a verified result, that method receives a higher priority for future origin-IP verification tasks.
 
-The score is smoothed, so one result does not permanently dominate. New tools begin with a neutral score. Tool rankings are advisory; Loki still has to verify the evidence and obey current scope.
+The score is smoothed, so one result does not permanently dominate. New tools begin with a neutral score. Tool rankings are advisory; Loki still has to verify the evidence and obey current scope. Each tool result updates the local score immediately. For example, after 15 no-result methods and a 16th method that returns verified owner-controlled evidence, that 16th method is promoted for future origin-IP verification tasks. The continuation message also carries a de-duplicated method ledger so Loki is encouraged to try a genuinely different method instead of looping.
 
 By default, the local memory file is:
 
