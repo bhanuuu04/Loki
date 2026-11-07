@@ -16,6 +16,7 @@ from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file, reset_configuration
 from loki.providers.nvidia_provider import NvidiaNimProvider
 from loki.providers.compatibility import ModelCompatibilityTester
+from loki.security_bootstrap import ensure_security_secrets
 
 console = Console(force_terminal=True)
 
