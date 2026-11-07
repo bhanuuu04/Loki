@@ -261,3 +261,114 @@ def test_cli_entrypoint_accepts_loki_update_check(monkeypatch):
     cli_main.cli_entrypoint()
 
     assert calls == {"check_only": True, "skip_dependencies": False}
+
+
+
+def test_updater_prefers_active_virtualenv_python(tmp_path, monkeypatch):
+    import os
+    import sys
+
+    venv = tmp_path / ".venv"
+    executable = venv / "bin" / "python"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin", encoding="utf-8")
+
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+
+    updater = LokiUpdater(repo_dir=tmp_path)
+
+    assert updater.python_executable == str(executable)
+    assert updater.using_active_environment is True
+    assert updater.externally_managed_python is False
+
+
+def test_updater_uses_conda_environment_python_when_active(tmp_path, monkeypatch):
+    venv = tmp_path / "conda-env"
+    executable = venv / "bin" / "python"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    (venv / "conda-meta").mkdir()
+
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.setenv("CONDA_PREFIX", str(venv))
+
+    updater = LokiUpdater(repo_dir=tmp_path)
+
+    assert updater.python_executable == str(executable)
+    assert updater.using_active_environment is True
+
+
+def test_pep668_system_python_fails_with_virtualenv_guidance_without_running_pip(
+    tmp_path, monkeypatch
+):
+    import sys
+    import sysconfig
+
+    runner = FakeGitRunner(tmp_path, ahead_behind="0 0")
+    stdlib = tmp_path / "python" / "lib"
+    stdlib.mkdir(parents=True)
+    (stdlib / "EXTERNALLY-MANAGED").write_text("managed by OS", encoding="utf-8")
+
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.delenv("CONDA_PREFIX", raising=False)
+    monkeypatch.setattr(sys, "prefix", "/usr")
+    monkeypatch.setattr(sys, "base_prefix", "/usr")
+    monkeypatch.setattr(sysconfig, "get_path", lambda _name: str(stdlib))
+
+    updater = LokiUpdater(repo_dir=tmp_path, command_runner=runner)
+    result = updater.run()
+
+    assert not result.success
+    assert result.state == "dependency_error"
+    assert result.dependencies_ok is False
+    assert any("PEP 668" in item for item in result.details)
+    assert any("source .venv/bin/activate" in item for item in result.details)
+    assert not any(command[0] != "git" for command in runner.commands)
+
+
+def test_cli_update_runs_doctor_with_the_selected_environment_python(
+    tmp_path, monkeypatch
+):
+    import sys
+    from types import SimpleNamespace
+
+    from loki.cli import main as cli_main
+    from loki.cli import updater as updater_module
+    from loki.cli.updater import UpdateResult
+
+    calls = {}
+
+    class StubUpdater:
+        repo_dir = tmp_path
+        python_executable = str(tmp_path / ".venv" / "bin" / "python")
+
+        def run(self, *, check_only=False, skip_dependencies=False):
+            return UpdateResult(
+                success=True,
+                state="up_to_date",
+                message="Loki source is current; dependencies were checked and refreshed.",
+                current_commit="a" * 40,
+                latest_commit="a" * 40,
+                dependencies_ok=True,
+            )
+
+    def fake_subprocess_run(command, **kwargs):
+        calls["command"] = command
+        calls["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sys, "argv", ["loki", "update"])
+    monkeypatch.setattr(updater_module, "LokiUpdater", StubUpdater)
+    monkeypatch.setattr(cli_main.subprocess, "run", fake_subprocess_run)
+
+    cli_main.cli_entrypoint()
+
+    assert calls["command"] == [
+        StubUpdater.python_executable,
+        "-m",
+        "loki.cli.main",
+        "doctor",
+    ]
+    assert calls["cwd"] == str(tmp_path)
