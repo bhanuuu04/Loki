@@ -219,9 +219,21 @@ def configure_scope(
     capabilities=[ToolCapability.UTILITY],
 )
 def check_scope(target: str) -> str:
-    """Check if target is authorized under scope."""
+    """Check direct target authorization and distinguish DNS observations."""
     allowed, reason = scope_mgr.is_in_scope(target)
-    return f"Target: {target} | In Scope: {allowed} | Details: {reason}"
+    if allowed:
+        return f"Target: {target} | In Scope: True | Details: {reason}"
+
+    dns_owner = scope_mgr.dns_observation_owner(target)
+    if dns_owner:
+        return (
+            f"Target: {target} | Direct IP Testing Authorized: False | "
+            f"DNS Observation: this address is currently returned for explicitly "
+            f"in-scope hostname '{dns_owner}'. This does not authorize direct IP "
+            "interaction and does not prove the address is the origin. "
+            f"Details: {reason}"
+        )
+    return f"Target: {target} | In Scope: False | Details: {reason}"
 
 
 @tool(
@@ -787,6 +799,7 @@ async def dns_lookup(domain: str) -> str:
         if aliases:
             res.append(f"Aliases: {', '.join(aliases)}")
         res.append(f"IP Addresses: {', '.join(ips)}")
+        res.append("Note: DNS answers identify current front-door addresses only; they do not establish the hosting origin or prove that these IPs are safe to test directly.")
         return "\n".join(res)
     except Exception as e:
         return f"DNS resolution failed for '{domain}': {str(e)}"
