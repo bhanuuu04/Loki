@@ -535,8 +535,8 @@ def record_finding(
     evidence: str,
     cwe_id: Optional[str] = None,
     cvss_score: float = 0.0,
-    requires: Optional[List[str]] = None,
-    enables: Optional[List[str]] = None,
+    requires: List[str] = [],
+    enables: List[str] = [],
 ) -> str:
     """Persist a finding only when its evidence is anchored to a real tool result."""
     ctx = AssessmentSecurityContext.get_default()
@@ -576,7 +576,7 @@ def record_finding(
     normalized_enables = normalize_capabilities(enables)
     requested_capabilities = {
         str(item).strip().lower().replace("-", "_").replace(" ", "_")
-        for item in (requires or []) + (enables or [])
+        for item in requires + enables
     }
     rejected_capabilities = sorted(requested_capabilities - CHAIN_CAPABILITIES)
     if rejected_capabilities:
@@ -612,12 +612,16 @@ def record_finding(
         raw_response_text=raw_output,
     )
     assessment_store.add_finding(session_id, finding)
-    return (
+    summary = (
         f"Finding '{finding_id}: {title}' recorded. "
         f"Status: {finding.lifecycle.value}; confidence: {finding.confidence.value}; "
         f"severity: {finding.severity.value}; evidence: {evidence_record_id}. "
         "The finding is not a confirmed end-to-end attack chain."
     )
+    refreshed = assessment_store.load_assessment(session_id)
+    if refreshed and len(refreshed.findings) >= 2:
+        summary += "\\n\\nAUTOMATIC CROSS-FINDING CORRELATION\\n" + analyze_chains(session_id)
+    return summary
 
 
 @tool(
