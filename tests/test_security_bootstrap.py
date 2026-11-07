@@ -13,6 +13,8 @@ def _clear_security_env(monkeypatch):
 
 
 def test_first_run_generates_private_independent_secrets(tmp_path, monkeypatch):
+    from loki.config import settings
+    monkeypatch.setattr(settings, "operator_token", settings.operator_token)
     secret_path = tmp_path / "profile" / "security.env"
     monkeypatch.setenv("LOKI_SECURITY_ENV_FILE", str(secret_path))
     _clear_security_env(monkeypatch)
@@ -39,6 +41,8 @@ def test_first_run_generates_private_independent_secrets(tmp_path, monkeypatch):
 
 
 def test_first_run_is_idempotent_and_reuses_saved_secrets(tmp_path, monkeypatch):
+    from loki.config import settings
+    monkeypatch.setattr(settings, "operator_token", settings.operator_token)
     secret_path = tmp_path / "security.env"
     monkeypatch.setenv("LOKI_SECURITY_ENV_FILE", str(secret_path))
     _clear_security_env(monkeypatch)
@@ -62,6 +66,8 @@ def test_first_run_is_idempotent_and_reuses_saved_secrets(tmp_path, monkeypatch)
 
 
 def test_external_secrets_are_respected_but_not_copied_to_local_file(tmp_path, monkeypatch):
+    from loki.config import settings
+    monkeypatch.setattr(settings, "operator_token", settings.operator_token)
     secret_path = tmp_path / "security.env"
     monkeypatch.setenv("LOKI_SECURITY_ENV_FILE", str(secret_path))
     operator_token = "externally-provisioned-operator-token-0123456789"
