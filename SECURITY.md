@@ -52,7 +52,7 @@ Loki correlates findings only when each finding:
 - Has a gateway-authorized evidence record with a matching integrity hash.
 - Has an evidence excerpt that matches the recorded tool output.
 - Has sufficient confidence and is not marked as a likely false positive.
-- Declares supported \`requires\` and/or \`enables\` capability labels grounded in that evidence.
+- Declares supported `requires` and/or `enables` capability labels grounded in that evidence.
 
 A matching capability relationship produces a **potential chain candidate**, not a verified exploit path. Loki must identify the missing preconditions and use scoped, non-destructive follow-up checks where supported. It must not add together the severities of separate findings or label a chain critical solely because its individual findings look serious.
 
