@@ -41,3 +41,23 @@ async def test_agent_error_handling():
     assert "Simulated network outage" in result.error_message
     assert result.final_response != ""
     assert "Simulated network outage" in result.final_response
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_exception_does_not_abort_agent_tool_loop():
+    from loki.types import ToolCall
+
+    agent = LokiAgent(provider="mock")
+
+    async def exploding_tool_call(_tool_call):
+        raise ValueError("No closing quotation")
+
+    agent.registry.execute_call = exploding_tool_call
+    result = await agent._execute_tool_call(
+        ToolCall(id="bad-quote-1", name="python_exec", arguments={"code": "print('broken"})
+    )
+
+    assert result.is_error
+    assert result.metadata["execution_exception"] is True
+    assert result.metadata["authorized"] is False
+    assert "No closing quotation" in result.output
