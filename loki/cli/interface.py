@@ -213,7 +213,8 @@ class LokiConversationalCLI:
         left_text = (
             f" [dim]Provider:[/dim] [bold green]{self.provider_name}[/bold green]\n"
             f" [dim]AI Model:[/dim] [bold cyan]{self.model_name}[/bold cyan]\n"
-            f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]"
+            f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]\\n"
+            f" [dim]Lab Verification:[/dim] [bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]{'ENABLED' if self.scope_manager.config.lab_mode_enabled else 'disabled'}[/bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]"
         )
 
         # Right Column
@@ -264,6 +265,7 @@ class LokiConversationalCLI:
             table.add_row("/provider [name]", "Switch provider (nvidia, mock, gemini, openai, ollama)")
             table.add_row("/mode [safe|audit|nomercy]", "Switch assessment intensity; NOMERCY requires operator confirmation")
             table.add_row("/scope [add|exclude target]", "Inspect or update authorized target scope")
+            table.add_row("/lab [status|enable|disable]", "Enable canary-only proof-of-access tools for a disposable lab")
             table.add_row("/tools", "List registered security tools")
             table.add_row("/status", "Show active session telemetry & token usage")
             table.add_row("/history", "View conversation history")
@@ -329,6 +331,94 @@ class LokiConversationalCLI:
                 console.print(
                     f"[bold green]✔ Execution mode updated to:[/bold green] {self.mode.value.upper()}"
                 )
+
+
+        elif sub == "/lab":
+            action = arg.strip().lower() or "status"
+            ctx = self.agent.security_context
+
+            if action == "status":
+                enabled = bool(self.scope_manager.config.lab_mode_enabled)
+                active = ctx.active_assessment_id or "none"
+                console.print(
+                    f"Lab verification: [{'green' if enabled else 'yellow'}]"
+                    f"{'ENABLED' if enabled else 'disabled'}[/] | "
+                    f"Assessment: [cyan]{active}[/cyan]"
+                )
+                if not enabled:
+                    console.print(
+                        "[dim]To enable: switch to /mode nomercy, add only disposable lab targets "
+                        "to /scope, then run /lab enable.[/dim]"
+                    )
+            elif action == "enable":
+                if self.mode != ExecutionMode.NOMERCY:
+                    console.print("[yellow]Switch to /mode nomercy before enabling lab verification.[/yellow]")
+                    return True
+                if self.scope_manager.config.lab_mode_enabled:
+                    console.print("[green]Lab verification is already enabled.[/green]")
+                    return True
+                if not self.scope_manager.config.targets:
+                    console.print("[red]Add at least one explicitly authorized lab target with /scope first.[/red]")
+                    return True
+                confirmed = Confirm.ask(
+                    "[bold red]Enable lab proof-of-access for the currently scoped disposable test environment? "
+                    "Only use systems you own or have explicit permission to test. Continue?[/bold red]",
+                    default=False,
+                )
+                if not confirmed:
+                    console.print("[yellow]Lab verification remains disabled.[/yellow]")
+                    return True
+
+                updated_scope = self.scope_manager.config.model_copy(deep=True)
+                updated_scope.lab_mode_enabled = True
+                self.scope_manager.set_config(
+                    updated_scope,
+                    author="interactive_operator",
+                    reason="Operator explicitly enabled NOMERCY lab proof-of-access",
+                )
+
+                try:
+                    assessment_id = ctx.active_assessment_id or f"lab_{self.session_id}"
+                    session = ctx.assessment_store.load_assessment(assessment_id)
+                    if session is None:
+                        session = ctx.assessment_store.create_assessment(
+                            session_id=assessment_id,
+                            name=updated_scope.assessment_name or "Loki Lab Assessment",
+                            scope=updated_scope,
+                        )
+                    session.scope = updated_scope
+                    session.execution_mode = ExecutionMode.NOMERCY
+                    ctx.assessment_store.save_assessment(session)
+                    ctx.active_assessment_id = assessment_id
+                except Exception as exc:
+                    rollback_scope = self.scope_manager.config.model_copy(deep=True)
+                    rollback_scope.lab_mode_enabled = False
+                    self.scope_manager.set_config(
+                        rollback_scope,
+                        author="interactive_operator",
+                        reason="Lab assessment initialization failed; lab mode rolled back",
+                    )
+                    console.print(f"[bold red]Could not initialize lab assessment:[/bold red] {type(exc).__name__}")
+                    return True
+
+                console.print(
+                    f"[bold green]Lab proof-of-access enabled for {len(updated_scope.targets)} scoped target(s).[/bold green]"
+                )
+                console.print(
+                    f"[dim]Active evidence session: {ctx.active_assessment_id}. "
+                    "Only exact seeded canary records can be extracted.[/dim]"
+                )
+            elif action == "disable":
+                updated_scope = self.scope_manager.config.model_copy(deep=True)
+                updated_scope.lab_mode_enabled = False
+                self.scope_manager.set_config(
+                    updated_scope,
+                    author="interactive_operator",
+                    reason="Operator disabled lab proof-of-access",
+                )
+                console.print("[green]Lab proof-of-access disabled.[/green]")
+            else:
+                console.print("[yellow]Usage: /lab status | /lab enable | /lab disable[/yellow]")
 
         elif sub == "/scope":
             if not arg:
