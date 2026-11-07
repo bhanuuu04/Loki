@@ -90,6 +90,9 @@ class SecurityFinding(BaseModel):
     evidence_record_id: Optional[str] = None
     evidence_provenance: Optional[str] = None
     evidence: str = ""
+    # Capability labels describe only what the captured evidence demonstrates or requires.
+    requires: List[str] = Field(default_factory=list)
+    enables: List[str] = Field(default_factory=list)
     evidence_hash: Optional[str] = None
     reproduction: Optional[ReproductionRecord] = None
     false_positive_risk_score: float = 0.0  # 0.0 (unlikely) to 1.0 (highly likely FP)
