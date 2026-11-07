@@ -9,6 +9,7 @@ import asyncio
 import sys
 import os
 import secrets
+import subprocess
 from pathlib import Path
 import uvicorn
 from rich.console import Console
@@ -285,9 +286,19 @@ def cli_entrypoint() -> None:
         if args.check:
             return
 
-        console.print("\n[bold cyan]Running post-update diagnostics...[/bold cyan]")
-        diagnostic_items = asyncio.run(LokiDoctor.run_diagnostics())
-        healthy = LokiDoctor.display_report(diagnostic_items)
+        console.print("\n[bold cyan]Running post-update diagnostics with the refreshed code...[/bold cyan]")
+        try:
+            diagnostic_run = subprocess.run(
+                [sys.executable, "-m", "loki.cli.main", "doctor"],
+                cwd=str(updater.repo_dir),
+                check=False,
+                timeout=300,
+            )
+            healthy = diagnostic_run.returncode == 0
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            console.print(f"[bold red]Could not run post-update diagnostics:[/bold red] {exc}")
+            raise SystemExit(2) from exc
+
         if not healthy:
             console.print(
                 "[bold yellow]The source update is installed, but diagnostics found "
@@ -304,7 +315,8 @@ def cli_entrypoint() -> None:
 
     elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())
-        LokiDoctor.display_report(items)
+        if not LokiDoctor.display_report(items):
+            raise SystemExit(2)
 
     elif args.command == "config":
         console.print("\n[bold cyan]─── LOKI ACTIVE CONFIGURATION ───[/bold cyan]")
