@@ -43,7 +43,17 @@ def _active_environment_python() -> Optional[str]:
 
     environment_dir = Path(prefix).expanduser()
     if os.name == "nt":
-        candidates = [environment_dir / "Scripts" / "python.exe"]
+        if os.environ.get("VIRTUAL_ENV"):
+            candidates = [
+                environment_dir / "Scripts" / "python.exe",
+                environment_dir / "python.exe",
+            ]
+        else:
+            # Conda on Windows keeps python.exe at the environment root.
+            candidates = [
+                environment_dir / "python.exe",
+                environment_dir / "Scripts" / "python.exe",
+            ]
     else:
         candidates = [
             environment_dir / "bin" / "python",
