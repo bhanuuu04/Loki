@@ -281,7 +281,7 @@ def cli_entrypoint() -> None:
         if result.latest_commit:
             console.print(f"[dim]Official main: {result.latest_commit[:12]}[/dim]")
 
-        if not result.success:
+        if not result.success and result.state != "dependency_error":
             raise SystemExit(1)
         if args.check:
             return
@@ -306,6 +306,14 @@ def cli_entrypoint() -> None:
                 "again after fixing them.[/bold yellow]"
             )
             raise SystemExit(2)
+
+        if result.dependencies_ok is False:
+            console.print(
+                "[bold yellow]The source code was updated, but pip could not complete "
+                "the dependency refresh. Resolve the pip error shown above and rerun "
+                "'loki update'.[/bold yellow]"
+            )
+            raise SystemExit(1)
 
         console.print("[bold green]✔ Update and diagnostics completed successfully.[/bold green]")
         console.print(
