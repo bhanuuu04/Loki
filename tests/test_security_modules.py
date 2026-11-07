@@ -194,3 +194,31 @@ def test_lab_data_verification_is_classified_as_high_risk_active_test():
         target="lab.example.test",
     )
     assert permitted
+
+
+def test_policy_engine_does_not_shlex_parse_python_source_or_payloads():
+    """Unmatched quotes in non-shell tool data must not abort policy evaluation."""
+    scope = ScopeManager(ScopeConfig(assessment_name="Python Parser Test", targets=["target.local"]))
+    policy = PolicyEngine(scope_manager=scope, mode=ExecutionMode.AUDIT)
+
+    malformed_python = "code=print('this string is deliberately unterminated"
+    tokens = policy._command_tokens("python_exec", [malformed_python])
+    assert tokens == ["python_exec"]
+
+    permitted, risk, reason = policy.evaluate_execution(
+        "python_exec",
+        [malformed_python],
+    )
+    assert permitted
+    assert risk == CommandRisk.MEDIUM
+    assert reason
+
+
+def test_policy_engine_still_classifies_shell_commands_with_unmatched_quotes():
+    """Malformed shell quoting must not hide dangerous executable names."""
+    scope = ScopeManager(ScopeConfig(assessment_name="Shell Parser Test", targets=["target.local"]))
+    policy = PolicyEngine(scope_manager=scope, mode=ExecutionMode.NOMERCY)
+
+    malformed_command = "command=hydra -l test -P words 'unterminated"
+    assert policy.is_brute_force_command("run_command", [malformed_command])
+    assert policy.is_brute_force_command("shell_exec", [malformed_command])
