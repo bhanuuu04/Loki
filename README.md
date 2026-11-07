@@ -51,15 +51,17 @@ Loki can be used through its interactive CLI or its local FastAPI-based Web UI.
 | **AI providers** | NVIDIA NIM, OpenAI, Google Gemini, Ollama, and an offline Mock provider |
 | **Assessment policies** | SAFE, AUDIT, and NOMERCY modes with operator confirmation for high-intensity testing |
 | **Scope management** | Approved targets, exclusions, and scope checks before target interaction |
-| **Security tooling** | A registered tool catalog, security checks, assessment findings, and reporting support |
+| **Kali tool intelligence** | Searchable index synced from Kali's official All Tools catalogue, including tool entries, packages, executable aliases, categories, docs, and host detection |
+| **Tool calling** | On-demand discovery and detail functions so the model selects relevant tools without loading hundreds of function schemas |
+| **Security tooling** | Scope-governed built-in checks, assessment findings, and reporting support |
 | **Lab verification** | Canary-based proof-of-access checks for seeded dummy records in disposable environments |
 | **Execution adapters** | Native Windows and Linux support, WSL2 integration, and Docker-based isolation |
 | **Interfaces** | Interactive terminal, FastAPI endpoints, and a browser-based UI |
-| **Diagnostics** | \`loki doctor\` for environment and dependency checks |
+| **Diagnostics** | `loki doctor` for environment and dependency checks |
 
 ### How the pieces fit together
 
-\`\`\`mermaid
+```mermaid
 flowchart TD
     A["Operator"] --> B["Loki CLI / Web UI"]
     B --> C["AI Agent Runtime"]
@@ -69,7 +71,7 @@ flowchart TD
     C --> G["Assessment Findings"]
     G --> H["Reports & Evidence"]
     I["LLM Provider"] <--> C
-\`\`\`
+```
 
 The model helps plan and interpret work. Loki's policy and scope layers govern tool execution; selecting a more intensive mode does not grant permission to test additional targets.
 
@@ -86,48 +88,48 @@ The model helps plan and interpret work. Loki's policy and scope layers govern t
 
 ### 1. Clone the repository
 
-\`\`\`bash
+```bash
 git clone https://github.com/bhanuuu04/Loki.git
 cd Loki
-\`\`\`
+```
 
 ### 2. Create a virtual environment
 
 **Linux / macOS / Kali Linux**
 
-\`\`\`bash
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
-\`\`\`
+```
 
 On Debian-based systems, install the venv package first if needed:
 
-\`\`\`bash
+```bash
 sudo apt update
 sudo apt install -y python3-venv
-\`\`\`
+```
 
 **Windows PowerShell**
 
-\`\`\`powershell
+```powershell
 py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
-\`\`\`
+```
 
 ### 3. Install Loki
 
-\`\`\`bash
+```bash
 python -m pip install --upgrade pip
 python -m pip install -e .
-\`\`\`
+```
 
 ### 4. Configure an AI provider
 
 Run the interactive setup wizard:
 
-\`\`\`bash
+```bash
 loki onboard
-\`\`\`
+```
 
 Choose a provider from the menu:
 
@@ -139,18 +141,18 @@ Choose a provider from the menu:
 | **Ollama** | Connect to a local Ollama server |
 | **Mock** | Offline testing; no API key required |
 
-The wizard saves provider settings locally. You can rerun it later with \`loki onboard --reset\`.
+The wizard saves provider settings locally. You can rerun it later with `loki onboard --reset`.
 
 ### 5. Check your installation and launch Loki
 
-\`\`\`bash
+```bash
 loki doctor
 loki
-\`\`\`
+```
 
 That’s it. Loki opens its interactive terminal session.
 
-> **Command not found?** Make sure your virtual environment is activated. You can also run commands through Python, for example: \`python -m loki.cli.main doctor\`.
+> **Command not found?** Make sure your virtual environment is activated. You can also run commands through Python, for example: `python -m loki.cli.main doctor`.
 
 ---
 
@@ -158,9 +160,9 @@ That’s it. Loki opens its interactive terminal session.
 
 Start the local API and browser interface:
 
-\`\`\`bash
+```bash
 loki start
-\`\`\`
+```
 
 Then open:
 
@@ -168,9 +170,9 @@ Then open:
 
 You can choose a different local port:
 
-\`\`\`bash
+```bash
 loki start --host 127.0.0.1 --port 8080
-\`\`\`
+```
 
 Keep the service bound to localhost unless you have separately configured and secured any remote access. Do not expose an unauthenticated development interface directly to the public internet.
 
@@ -184,20 +186,20 @@ A typical assessment follows this sequence:
 
 Inside the interactive Loki session:
 
-\`\`\`text
+```text
 /scope
 /scope add example.test
-\`\`\`
+```
 
-Replace \`example.test\` with a domain, IP address, or host that you own or have written permission to assess. Review the active scope before running tools.
+Replace `example.test` with a domain, IP address, or host that you own or have written permission to assess. Review the active scope before running tools.
 
 ### 2. Select an assessment mode
 
-\`\`\`text
+```text
 /mode safe
 /mode audit
 /mode nomercy
-\`\`\`
+```
 
 | Mode | Intended use |
 | --- | --- |
@@ -211,16 +213,95 @@ NOMERCY requires an interactive confirmation. Destructive actions and denial-of-
 
 Useful commands:
 
-\`\`\`text
+```text
 /tools
 /status
 /history
-\`\`\`
+```
 
 Ask Loki to perform a specific assessment task and keep the target, objective, and constraints explicit. Review the evidence and findings before treating a result as confirmed.
 
 ---
 
+## 🐉 Kali Linux tool intelligence
+
+Loki can build a searchable knowledge index from Kali's official [All Tools catalogue](https://www.kali.org/tools/all-tools/). The index includes tool/source names, related package names, executable aliases, inferred categories, official documentation links, and host PATH detection.
+
+### 1. Sync the official catalogue
+
+Run from a terminal with internet access:
+
+```bash
+loki tools --sync-kali
+```
+
+The catalogue is cached locally at:
+
+```text
+~/.loki/kali-tools-index.json
+```
+
+The sync is read-only: it downloads and indexes catalogue metadata. It does **not** install packages or execute tools. Loki reports the actual entry count returned by Kali; the upstream catalogue can change over time.
+
+### 2. Search by task or tool
+
+```bash
+loki tools --search "wireless network auditing"
+loki tools --search "subdomain discovery"
+loki tools --search "web directory fuzzing"
+loki tools --search "nmap"
+loki tools --installed-only
+loki tools --details sqlmap
+```
+
+Inside an interactive session:
+
+```text
+/tool sync
+/tool search web application fuzzing
+/tool info nmap
+/tool installed
+```
+
+### 3. How Loki chooses tools
+
+The model has two on-demand discovery functions:
+
+- **discover_kali_tools** — finds candidate tools by task, category, package, or executable name.
+- **get_kali_tool_details** — inspects one candidate and returns package information, aliases, host detection, and official documentation.
+
+The agent is instructed to discover first, inspect one candidate, check authorization when relevant, and then make a minimal tool call. It does not receive hundreds of extra function schemas on every turn; it queries the catalogue when it needs to.
+
+**Installed status is separate from catalogue knowledge.** A tool can exist in Kali's catalogue without being installed. A binary detected on the Loki host may still be absent from the Docker shell image.
+
+### 4. Optional Kali-based shell image
+
+The default isolated shell image remains minimal Alpine. To build an optional Kali image with the top-10 Kali toolset:
+
+```bash
+docker build -f Dockerfile.kali-tools -t loki-kali-tools:latest .
+```
+
+Then add this to your local `.env`:
+
+```env
+LOKI_SHELL_DOCKER_IMAGE=loki-kali-tools:latest
+```
+
+Restart Loki after changing the setting.
+
+For a much larger image, the Dockerfile accepts a Kali metapackage override:
+
+```bash
+docker build --build-arg KALI_TOOLSET=kali-linux-everything \
+  -f Dockerfile.kali-tools -t loki-kali-everything:latest .
+```
+
+The full Kali metapackage is very large. See Kali's [metapackage documentation](https://www.kali.org/docs/general-use/metapackages/) before choosing it.
+
+> **Important execution boundary:** Loki continues to launch the generic shell container with networking disabled. The Kali image allows installed tools to run for local/offline analysis, file inspection, and other sandboxed tasks. It does not enable remote scans. Live network actions must use dedicated tools that enforce the approved assessment scope. Tool discovery never expands scope or changes the sandbox policy.
+
+---
 ## 🧪 NOMERCY lab proof-of-access
 
 NOMERCY includes a **canary-based verification workflow** for disposable labs and cloned applications. It is designed to check whether a seeded dummy JSON record was actually returned — not to dump arbitrary application data.
@@ -242,57 +323,57 @@ NOMERCY includes a **canary-based verification workflow** for disposable labs an
 
 Run this in a separate terminal:
 
-\`\`\`bash
+```bash
 loki lab-canary
-\`\`\`
+```
 
 Copy the generated marker. It will look like:
 
-\`\`\`text
+```text
 LOKI-LAB-CANARY:your-generated-value
-\`\`\`
+```
 
 **2. Seed it into a dummy JSON record**
 
-Add the exact marker to a test fixture served by your disposable lab. Use the \`loki_canary\` field:
+Add the exact marker to a test fixture served by your disposable lab. Use the `loki_canary` field:
 
-\`\`\`json
+```json
 {
   "id": "loki-fixture-001",
   "loki_canary": "LOKI-LAB-CANARY:paste-your-generated-value-here",
   "record": "dummy-lab-data"
 }
-\`\`\`
+```
 
 Replace the example marker with the value generated by your own Loki installation. Keep the marker out of the request URL and test payload.
 
 **3. Start Loki and scope it to the lab**
 
-\`\`\`text
+```text
 /scope add lab.example.test
 /mode nomercy
-\`\`\`
+```
 
 Confirm the NOMERCY prompt. Use your actual disposable lab hostname.
 
 **4. Enable lab verification**
 
-\`\`\`text
+```text
 /lab status
 /lab enable
-\`\`\`
+```
 
 Read the confirmation prompt and enable it only for the disposable environment.
 
 **5. Ask Loki to verify the fixture**
 
-Provide the scoped endpoint, the canary marker, and — when testing an injection hypothesis — the single query-parameter name and test value. Ask Loki to use \`verify_lab_data_access\` and compare the control request with the test request.
+Provide the scoped endpoint, the canary marker, and — when testing an injection hypothesis — the single query-parameter name and test value. Ask Loki to use `verify_lab_data_access` and compare the control request with the test request.
 
 **6. Turn it off when finished**
 
-\`\`\`text
+```text
 /lab disable
-\`\`\`
+```
 
 ### Verification limits
 
@@ -317,58 +398,64 @@ A direct canary match proves that the seeded record was retrievable. It does **n
 
 | Command | Purpose |
 | --- | --- |
-| \`loki\` | Start interactive chat |
-| \`loki onboard\` | Open the provider setup wizard |
-| \`loki onboard --reset\` | Reset provider configuration and rerun setup |
-| \`loki doctor\` | Check dependencies and platform readiness |
-| \`loki start\` | Start the local Web UI and API |
-| \`loki run "your prompt"\` | Run one prompt and exit |
-| \`loki tools\` | List registered tools |
-| \`loki model\` | Open the model selector |
-| \`loki model --list --provider nvidia\` | List models from a provider |
-| \`loki model --test --provider nvidia\` | Test provider compatibility |
-| \`loki eval path/to/suite.json\` | Run a benchmark suite |
-| \`loki config\` | Inspect active configuration |
-| \`loki lab-canary\` | Generate a lab fixture marker |
-| \`loki --version\` | Print the installed version |
+| `loki` | Start interactive chat |
+| `loki onboard` | Open the provider setup wizard |
+| `loki onboard --reset` | Reset provider configuration and rerun setup |
+| `loki doctor` | Check dependencies and platform readiness |
+| `loki start` | Start the local Web UI and API |
+| `loki run "your prompt"` | Run one prompt and exit |
+| `loki tools` | List registered runtime tools and Kali catalogue status |
+| `loki tools --sync-kali` | Sync Kali's official All Tools catalogue |
+| `loki tools --search "port scanning"` | Search the Kali catalogue by task or tool name |
+| `loki tools --installed-only` | List catalogue entries whose binaries are detected on the host |
+| `loki tools --details nmap` | Inspect a tool, package, aliases, and documentation |
+| `loki model` | Open the model selector |
+| `loki model --list --provider nvidia` | List models from a provider |
+| `loki model --test --provider nvidia` | Test provider compatibility |
+| `loki eval path/to/suite.json` | Run a benchmark suite |
+| `loki config` | Inspect active configuration |
+| `loki lab-canary` | Generate a lab fixture marker |
+| `loki --version` | Print the installed version |
 
 ### Commands inside interactive chat
 
 | Command | Purpose |
 | --- | --- |
-| \`/help\` | Show available chat commands |
-| \`/model [id]\` | Select or switch the model |
-| \`/provider [name]\` | Switch provider |
-| \`/mode [safe\|audit\|nomercy]\` | Change assessment mode |
-| \`/scope\` | View the approved target scope |
-| \`/scope add <target>\` | Add an authorized target |
-| \`/scope exclude <target>\` | Exclude a target |
-| \`/lab status\` | Check lab verification status |
-| \`/lab enable\` | Enable canary verification after confirmation |
-| \`/lab disable\` | Disable canary verification |
-| \`/tools\` | List available tools |
-| \`/status\` | Show session status |
-| \`/history\` | View conversation history |
-| \`/reset\` | Reset conversation memory |
-| \`/clear\` | Clear the terminal |
-| \`/exit\` or \`/quit\` | Exit Loki |
+| `/help` | Show available chat commands |
+| `/model [id]` | Select or switch the model |
+| `/provider [name]` | Switch provider |
+| `/mode [safe\|audit\|nomercy]` | Change assessment mode |
+| `/scope` | View the approved target scope |
+| `/scope add <target>` | Add an authorized target |
+| `/scope exclude <target>` | Exclude a target |
+| `/lab status` | Check lab verification status |
+| `/lab enable` | Enable canary verification after confirmation |
+| `/lab disable` | Disable canary verification |
+| `/tools` | List available tools |
+| `/status` | Show session status |
+| `/history` | View conversation history |
+| `/reset` | Reset conversation memory |
+| `/clear` | Clear the terminal |
+| `/exit` or `/quit` | Exit Loki |
 
 ---
 
 ## 🔐 Configuration and secrets
 
-Provider configuration is stored in the project’s local \`.env\` file. Start with \`.env.example\` if you prefer to configure values manually.
+Provider configuration is stored in the project’s local `.env` file. Start with `.env.example` if you prefer to configure values manually.
 
-**Never commit your \`.env\` file or paste API keys, passwords, bearer tokens, or session cookies into prompts.**
+**Never commit your `.env` file or paste API keys, passwords, bearer tokens, or session cookies into prompts.**
 
 Loki also generates its operator security credentials locally and stores them separately from the project configuration:
 
 | Operating system | Location |
 | --- | --- |
-| Linux / macOS | \`~/.loki/security.env\` |
-| Windows | \`%LOCALAPPDATA%\\Loki\\security.env\` |
+| Linux / macOS | `~/.loki/security.env` |
 
-On POSIX systems, Loki applies restrictive permissions to the security directory and file. Run \`loki doctor\` to check setup status without displaying secret values.
+The optional isolated shell image is configured separately with `LOKI_SHELL_DOCKER_IMAGE` in `.env`. It defaults to `alpine:latest`.
+| Windows | `%LOCALAPPDATA%\\Loki\\security.env` |
+
+On POSIX systems, Loki applies restrictive permissions to the security directory and file. Run `loki doctor` to check setup status without displaying secret values.
 
 ---
 
@@ -390,15 +477,15 @@ Docker and WSL2 are optional for basic CLI use. Containerized shell/Python execu
 
 Install the test dependencies:
 
-\`\`\`bash
+```bash
 python -m pip install pytest pytest-asyncio
-\`\`\`
+```
 
 Run the test suite:
 
-\`\`\`bash
+```bash
 python -m pytest -v
-\`\`\`
+```
 
 The GitHub Actions workflow runs the test suite on Ubuntu and Windows with Python 3.10 and 3.11.
 
