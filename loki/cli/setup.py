@@ -24,7 +24,13 @@ console = Console(force_terminal=True)
 async def run_setup_wizard(reset: bool = False):
     if reset:
         reset_configuration()
-        console.print("[yellow]✔ Existing configuration has been reset to defaults.[/yellow]\n")
+        console.print("[yellow]✔ Existing provider configuration has been reset to defaults.[/yellow]\n")
+
+    security_state = ensure_security_secrets()
+    if security_state["created"]:
+        console.print("[green]✓ Loki generated and securely stored its local security credentials.[/green]")
+    else:
+        console.print("[green]✓ Loki security credentials are ready.[/green]")
 
     console.print("\n" + "=" * 60, style="bold cyan")
     console.print("       LOKI ONBOARDING — INTERACTIVE SETUP WIZARD       ", style="bold cyan")
