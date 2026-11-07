@@ -471,10 +471,10 @@ async def dns_lookup(domain: str) -> str:
 @tool(
     name="verify_lab_data_access",
     description=(
-        "In NOMERCY + operator-enabled LAB mode, perform one scoped HTTP GET to verify "
-        "whether a seeded dummy-data canary record is actually retrievable. Optionally "
-        "inject ONE supplied payload into ONE query parameter after a no-payload control GET. An injection is confirmed "
-        "only when JSON contains an exact LOKI-LAB-CANARY marker in a canary field in the injected response, and not in the control response. "
+        "In NOMERCY + operator-enabled LAB mode, verify retrieval of a seeded dummy-data canary. "
+        "A payload test performs a no-payload control GET followed by ONE injected GET using "
+        "ONE query parameter. Injection is confirmed only when the canary is absent in control "
+        "and present in the injected response. Direct retrieval alone is not labelled an exploit. "
         "Returns only the matching sanitized fixture record, not arbitrary response data. "
         "No redirects, cookies, auth headers, non-JSON dumps, or unbounded responses."
     ),
@@ -484,7 +484,7 @@ async def dns_lookup(domain: str) -> str:
         category="lab_validation",
         requires_network=True,
         risk_classification="high",
-        expected_side_effects=["One HTTP GET request to the explicitly scoped lab endpoint"],
+        expected_side_effects=["One direct GET or two scoped GET requests (control and injected) to the lab endpoint"],
     ),
 )
 async def verify_lab_data_access(
@@ -494,11 +494,9 @@ async def verify_lab_data_access(
     payload: Optional[str] = None,
 ) -> str:
     """
-    Fetch a single JSON fixture record to prove lab data access.
-
-    The canary marker must be seeded by the operator in a dummy record and must
-    not be sent in the request. Only a record carrying the exact marker in a
-    recognized canary field is returned or recorded as a confirmed finding.
+    Fetch a seeded JSON fixture. A payload test uses a negative control request
+    and reports injection only when the exact canary is absent before the test
+    input and present after it. The marker itself is never sent to the target.
     """
     ctx = AssessmentSecurityContext.get_default()
     if policy_engine.mode != ExecutionMode.NOMERCY:
