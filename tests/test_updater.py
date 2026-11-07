@@ -50,7 +50,7 @@ class FakeGitRunner:
             stdout = self.status
         elif args == ["rev-parse", "HEAD"]:
             self.head_reads += 1
-            stdout = "a" * 40 if self.head_reads == 1 else "b" * 40
+            stdout = ("b" * 40) if self.ahead_behind == "0 0" else ("a" * 40 if self.head_reads == 1 else "b" * 40)
         elif args == ["fetch", "--prune", "origin"]:
             stdout = "Fetched origin"
         elif args == ["rev-parse", "--verify", "refs/remotes/origin/main"]:
@@ -197,3 +197,38 @@ def test_dependency_failure_is_reported_after_source_update(tmp_path):
     assert result.state == "dependency_error"
     assert result.dependencies_ok is False
     assert "dependency installation failed" in result.message
+
+
+
+def test_up_to_date_checkout_still_refreshes_declared_dependencies(tmp_path):
+    runner = FakeGitRunner(tmp_path, ahead_behind="0 0")
+    updater = LokiUpdater(
+        repo_dir=tmp_path,
+        command_runner=runner,
+        python_executable="python-test",
+    )
+
+    result = updater.run()
+
+    assert result.success
+    assert not result.updated
+    assert result.state == "up_to_date"
+    assert result.dependencies_ok is True
+    assert any(cmd[0] == "python-test" for cmd in runner.commands)
+    assert not any("merge" in cmd for cmd in runner.commands)
+
+
+def test_local_commits_ahead_of_official_main_are_preserved(tmp_path):
+    runner = FakeGitRunner(tmp_path, ahead_behind="2 0")
+    updater = LokiUpdater(
+        repo_dir=tmp_path,
+        command_runner=runner,
+        python_executable="python-test",
+    )
+
+    result = updater.run(skip_dependencies=True)
+
+    assert result.success
+    assert not result.updated
+    assert any("unpushed commit(s)" in item for item in result.details)
+    assert not any("merge" in cmd or "reset" in cmd for cmd in runner.commands)
