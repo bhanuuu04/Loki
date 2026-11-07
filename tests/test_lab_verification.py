@@ -110,6 +110,8 @@ def lab_context(tmp_path, monkeypatch):
     ctx.active_assessment_id = "lab_disposable"
     store.create_assessment(ctx.active_assessment_id, "Disposable Lab", config)
     AssessmentSecurityContext.reset_default(ctx)
+    _FakeClient.last_request = None
+    _FakeClient.response = None
     monkeypatch.setattr(security_tools.httpx, "AsyncClient", _FakeClient)
     return ctx
 
