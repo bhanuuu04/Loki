@@ -391,3 +391,38 @@ def test_ticket_issue_rejects_missing_operator_credential(monkeypatch):
         OperatorAuthorizationManager.issue_ticket(
             "assessment-one", ["example.com"], operator_token="not-the-operator-token"
         )
+
+
+@pytest.mark.asyncio
+async def test_network_shell_commands_require_parseable_in_scope_targets(clean_gateway):
+    from loki.tools.builtins.shell_tools import run_command
+
+    # A recognized network command without an identifiable target must not run.
+    missing_target = ToolCall(
+        id="hydra-no-target",
+        name="run_command",
+        arguments={"command": "hydra -l test -P passwords.txt ssh"},
+    )
+    missing_result = await clean_gateway.execute(missing_target, run_command)
+    assert missing_result.is_error
+    assert "requires an authorized target" in missing_result.output.lower()
+
+    # Positional hostnames used by credential-audit tools must be scope checked.
+    out_of_scope = ToolCall(
+        id="hydra-out-of-scope",
+        name="run_command",
+        arguments={"command": "hydra -l test -P passwords.txt evil.example ssh"},
+    )
+    out_result = await clean_gateway.execute(out_of_scope, run_command)
+    assert out_result.is_error
+    assert "scope violation" in out_result.output.lower()
+
+    # A parsed in-scope target reaches policy evaluation; SAFE still blocks high-risk SQLi scanning.
+    in_scope = ToolCall(
+        id="sqlmap-safe-mode",
+        name="run_command",
+        arguments={"command": "sqlmap -u http://authorized.example.com/item?id=1"},
+    )
+    in_result = await clean_gateway.execute(in_scope, run_command)
+    assert in_result.is_error
+    assert "SAFE" in in_result.output

@@ -16,6 +16,7 @@ from loki.cli.model_cmd import choose_model_interactive
 from loki.cli.env_utils import update_env_file, reset_configuration
 from loki.providers.nvidia_provider import NvidiaNimProvider
 from loki.providers.compatibility import ModelCompatibilityTester
+from loki.security_bootstrap import ensure_security_secrets
 
 console = Console(force_terminal=True)
 
@@ -23,7 +24,18 @@ console = Console(force_terminal=True)
 async def run_setup_wizard(reset: bool = False):
     if reset:
         reset_configuration()
-        console.print("[yellow]✔ Existing configuration has been reset to defaults.[/yellow]\n")
+        console.print("[yellow]✔ Existing provider configuration has been reset to defaults.[/yellow]\n")
+
+    try:
+        security_state = ensure_security_secrets()
+    except (OSError, PermissionError, RuntimeError) as exc:
+        console.print(f"[bold red]Security bootstrap failed:[/bold red] {exc}")
+        return
+
+    if security_state["created"]:
+        console.print("[green]✓ Loki generated and securely stored its local security credentials.[/green]")
+    else:
+        console.print("[green]✓ Loki security credentials are ready.[/green]")
 
     console.print("\n" + "=" * 60, style="bold cyan")
     console.print("       LOKI ONBOARDING — INTERACTIVE SETUP WIZARD       ", style="bold cyan")

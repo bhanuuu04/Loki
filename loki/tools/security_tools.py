@@ -156,8 +156,11 @@ def configure_scope(
     name = assessment_name or f"Assessment-{cleaned_targets[0]}"
 
     mode = ExecutionMode.SAFE
-    if execution_mode and execution_mode.lower() in ("safe", "aggressive", "advanced_audit"):
-        mode = ExecutionMode(execution_mode.lower())
+    if execution_mode:
+        try:
+            mode = ExecutionMode.parse(execution_mode)
+        except ValueError:
+            return "Scope configuration denied: execution_mode must be safe, audit, or nomercy."
 
     config = ScopeConfig(
         assessment_name=name,
@@ -170,6 +173,7 @@ def configure_scope(
         mode=mode,
         author="authenticated_operator",
         reason=reason or f"Configured scope for {name}",
+        operator_confirmed=True,
     )
 
     # Initialize assessment session in store

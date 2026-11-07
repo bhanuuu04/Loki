@@ -101,13 +101,14 @@ class AssessmentSecurityContext:
         mode: ExecutionMode = ExecutionMode.SAFE,
         author: str = "operator",
         reason: Optional[str] = None,
+        operator_confirmed: bool = False,
     ) -> None:
         """
         Updates the shared scope in-place.
         Propagates immediately to all agents, registries, and gateways.
         """
         self.scope_manager.set_config(config, author=author, reason=reason)
-        self.policy_engine.set_mode(mode)
+        self.policy_engine.set_mode(mode, operator_confirmed=operator_confirmed)
         # Re-verify references
         self.policy_engine.scope_manager = self.scope_manager
         self.gateway.scope_manager = self.scope_manager

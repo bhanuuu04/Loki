@@ -25,6 +25,7 @@ from loki.cli.doctor import LokiDoctor
 from loki.cli.setup import run_setup_wizard
 from loki.cli.interface import LokiConversationalCLI
 from loki.cli.model_cmd import run_model_command
+from loki.security_bootstrap import ensure_security_secrets
 from loki.providers.factory import get_provider
 from loki.providers.compatibility import ModelCompatibilityTester
 
@@ -174,6 +175,15 @@ def cli_entrypoint() -> None:
 
     args = parser.parse_args()
 
+    # Generate/load operator credentials automatically for commands that create or
+    # operate an assessment. Doctor/config/model inspection remain side-effect free.
+    if args.command in (None, "chat", "run", "eval", "serve", "start"):
+        try:
+            ensure_security_secrets()
+        except (OSError, PermissionError, RuntimeError) as exc:
+            console.print(f"[bold red]Security bootstrap failed:[/bold red] {exc}")
+            return
+
     # Route subcommands
     if args.command in ("setup", "onboard"):
         reset_flag = getattr(args, "reset", False)
@@ -199,7 +209,7 @@ def cli_entrypoint() -> None:
         console.print("\n[bold cyan]─── LOKI ACTIVE CONFIGURATION ───[/bold cyan]")
         cfg = settings.model_dump()
         for k, v in cfg.items():
-            if "api_key" in k and v:
+            if any(marker in k.lower() for marker in ("api_key", "token", "secret", "password", "signing")) and v:
                 v = f"********{v[-4:]}" if len(str(v)) > 4 else "********"
             console.print(f" [bold]{k}:[/bold] {v}")
         console.print("")

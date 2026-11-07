@@ -16,6 +16,7 @@ from loki.config import settings
 from loki.platform.detector import PlatformDetector, current_system
 from loki.platform.adapters.factory import get_platform_adapter
 from loki.knowledge.tool_registry.catalog import SecurityToolCatalog
+from loki.security_bootstrap import get_security_env_path
 
 console = Console(force_terminal=True)
 
@@ -117,6 +118,22 @@ class LokiDoctor:
             items.append(DiagnosticItem("LLM", "NVIDIA NIM Auth", "PASS", f"Key configured (Base: {settings.nvidia_nim_base_url})"))
         else:
             items.append(DiagnosticItem("LLM", "NVIDIA NIM Auth", "WARN", "NVIDIA_NIM_API_KEY not set (set in .env for NVIDIA NIM models)"))
+
+        secrets_ready = all(
+            os.environ.get(key) and len(os.environ[key].encode("utf-8")) >= 32
+            for key in ("LOKI_OPERATOR_TOKEN", "LOKI_AUTH_SIGNING_KEY")
+        )
+        security_path = get_security_env_path()
+        if secrets_ready:
+            items.append(DiagnosticItem(
+                "Security", "Operator Credentials", "PASS",
+                f"Required credentials available (local file: {security_path})",
+            ))
+        else:
+            items.append(DiagnosticItem(
+                "Security", "Operator Credentials", "WARN",
+                "Run 'loki setup' or start chat once to generate local security credentials.",
+            ))
 
         return items
 

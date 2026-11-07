@@ -16,6 +16,7 @@ from rich.table import Table
 from rich.markdown import Markdown
 from rich.rule import Rule
 from rich import box
+from rich.prompt import Confirm
 
 from loki import __version__
 from loki.config import settings
@@ -68,6 +69,9 @@ class LokiConversationalCLI:
         self.agent = LokiAgent(
             provider=get_provider(self.provider_name, model=self.model_name),
             max_steps=settings.max_steps,
+        )
+        self.agent.gateway.policy_engine.set_mode(
+            self.mode, operator_confirmed=(self.mode == ExecutionMode.NOMERCY)
         )
         self.agent.add_listener(self._on_agent_event)
 
@@ -258,7 +262,7 @@ class LokiConversationalCLI:
             table.add_column("Description")
             table.add_row("/model [id]", "Interactively pick or switch active AI model")
             table.add_row("/provider [name]", "Switch provider (nvidia, mock, gemini, openai, ollama)")
-            table.add_row("/mode [safe|aggressive]", "Switch execution policy mode")
+            table.add_row("/mode [safe|audit|nomercy]", "Switch assessment intensity; NOMERCY requires operator confirmation")
             table.add_row("/scope [add|exclude target]", "Inspect or update authorized target scope")
             table.add_row("/tools", "List registered security tools")
             table.add_row("/status", "Show active session telemetry & token usage")
@@ -294,11 +298,37 @@ class LokiConversationalCLI:
                 console.print(f"[bold green]✔ Provider updated to:[/bold green] {self.provider_name}")
 
         elif sub == "/mode":
-            if arg.lower() in ("safe", "aggressive", "advanced_audit"):
-                self.mode = ExecutionMode(arg.lower())
-                console.print(f"[bold green]✔ Execution mode updated to:[/bold green] {self.mode.value.upper()}")
+            if not arg:
+                console.print(
+                    f"Current mode: [yellow]{self.mode.value.upper()}[/yellow]. "
+                    "Options: safe, audit, nomercy"
+                )
             else:
-                console.print(f"Current mode: [yellow]{self.mode.value}[/yellow]. Options: safe, aggressive, advanced_audit")
+                try:
+                    requested_mode = ExecutionMode.parse(arg)
+                except ValueError:
+                    console.print("[yellow]Usage: /mode safe | audit | nomercy[/yellow]")
+                    return True
+
+                if requested_mode == ExecutionMode.NOMERCY:
+                    confirmed = Confirm.ask(
+                        "[bold red]NOMERCY enables high-intensity testing and credential-audit tools "
+                        "against explicitly authorized targets. Destructive and DoS actions remain blocked. "
+                        "Do you confirm?[/bold red]",
+                        default=False,
+                    )
+                    if not confirmed:
+                        console.print("[yellow]Mode unchanged. NOMERCY requires explicit operator confirmation.[/yellow]")
+                        return True
+
+                self.agent.gateway.policy_engine.set_mode(
+                    requested_mode,
+                    operator_confirmed=(requested_mode == ExecutionMode.NOMERCY),
+                )
+                self.mode = requested_mode
+                console.print(
+                    f"[bold green]✔ Execution mode updated to:[/bold green] {self.mode.value.upper()}"
+                )
 
         elif sub == "/scope":
             if not arg:
