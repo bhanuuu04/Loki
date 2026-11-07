@@ -22,6 +22,21 @@ class AgentContext:
         if system_prompt:
             self.messages.append(Message(role=Role.SYSTEM, content=system_prompt))
 
+    def set_system_prompt(self, content: str) -> Message:
+        """
+        Replace the active system instruction without discarding conversation history.
+
+        This refreshes runtime facts such as the current authorized scope when
+        a previously saved session is resumed.
+        """
+        if self.messages and self.messages[0].role == Role.SYSTEM:
+            self.messages[0].content = content
+            return self.messages[0]
+
+        message = Message(role=Role.SYSTEM, content=content)
+        self.messages.insert(0, message)
+        return message
+
     def add_user_message(self, content: str) -> Message:
         msg = Message(role=Role.USER, content=content)
         self.messages.append(msg)
