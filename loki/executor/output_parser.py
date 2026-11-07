@@ -1,8 +1,10 @@
 """
-Parsers for extracting structured security intelligence from tool outputs.
+Parsers for extracting structured security intelligence from tool outputs for Loki 2.0.
+Supports Nmap, HTTP security headers, WhatWeb, FFUF, and Nuclei JSON.
 """
 
 from typing import Any, Dict, List, Optional
+import json
 import re
 
 
@@ -32,7 +34,7 @@ class OutputParser:
     def parse_security_headers(headers: Dict[str, str]) -> Dict[str, Any]:
         """Analyze HTTP response headers for defensive security posture."""
         normalized = {k.lower(): v for k, v in headers.items()}
-        
+
         checks = {
             "strict-transport-security": normalized.get("strict-transport-security"),
             "content-security-policy": normalized.get("content-security-policy"),
@@ -55,3 +57,59 @@ class OutputParser:
             "missing_count": len(missing),
             "server_banner": server_banner,
         }
+
+    @staticmethod
+    def parse_whatweb_json(output: str) -> List[Dict[str, Any]]:
+        """Parses WhatWeb JSON output for discovered web technologies."""
+        try:
+            data = json.loads(output)
+            if isinstance(data, list):
+                return data
+            return [data]
+        except Exception:
+            # Fallback text parsing for plugin matches
+            technologies = []
+            for match in re.finditer(r"\[([^\]]+)\]", output):
+                technologies.append({"name": match.group(1)})
+            return technologies
+
+    @staticmethod
+    def parse_ffuf_json(output: str) -> List[Dict[str, Any]]:
+        """Parses Ffuf JSON output into structured endpoints and response codes."""
+        try:
+            data = json.loads(output)
+            results = data.get("results", [])
+            endpoints = []
+            for item in results:
+                endpoints.append({
+                    "url": item.get("url"),
+                    "status": item.get("status"),
+                    "length": item.get("length"),
+                    "words": item.get("words"),
+                })
+            return endpoints
+        except Exception:
+            return []
+
+    @staticmethod
+    def parse_nuclei_json(output: str) -> List[Dict[str, Any]]:
+        """Parses Nuclei JSONL stream output into structured vulnerability records."""
+        findings = []
+        for line in output.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                item = json.loads(line)
+                info = item.get("info", {})
+                findings.append({
+                    "template_id": item.get("template-id"),
+                    "name": info.get("name"),
+                    "severity": info.get("severity", "info"),
+                    "matched_at": item.get("matched-at"),
+                    "type": item.get("type"),
+                    "description": info.get("description", ""),
+                })
+            except Exception:
+                continue
+        return findings

@@ -1,7 +1,9 @@
 """
 Loki Command-Line Interface (CLI).
+Direct, streamlined, and robust CLI entry point for the Loki platform.
 """
 
+from typing import Optional
 import argparse
 import asyncio
 import sys
@@ -26,18 +28,20 @@ from loki.cli.model_cmd import run_model_command
 from loki.providers.factory import get_provider
 from loki.providers.compatibility import ModelCompatibilityTester
 
-# Ensure stdout/stderr handles UTF-8 on Windows
+# Ensure cross-platform UTF-8 terminal I/O on Windows
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
 console = Console(force_terminal=True)
 
 
-def _render_event(evt: AgentEvent):
+def _render_event(evt: AgentEvent) -> None:
     """Pretty prints execution events in the terminal in real-time."""
     if evt.event_type == EventType.STEP_START:
         step_num = evt.data.get("step_number")
@@ -45,26 +49,27 @@ def _render_event(evt: AgentEvent):
 
     elif evt.event_type == EventType.THOUGHT:
         thought = evt.data.get("thought", "")
-        console.print(Panel(thought, title="[magenta]Agent Thought / Response[/magenta]", border_style="magenta"))
+        if thought:
+            console.print(Panel(thought, title="[magenta]Agent Thought[/magenta]", border_style="magenta"))
 
     elif evt.event_type == EventType.TOOL_CALL_START:
         tname = evt.data.get("tool_name")
         args = evt.data.get("arguments")
-        console.print(f"[cyan]>> Invoking Tool:[/cyan] [bold]{tname}[/bold] with args: {args}")
+        console.print(f"[cyan]>> Tool Invoke:[/cyan] [bold]{tname}[/bold] {args}")
 
     elif evt.event_type == EventType.TOOL_CALL_END:
         tname = evt.data.get("tool_name")
         out = evt.data.get("output")
         time_ms = evt.data.get("execution_time_ms", 0)
-        console.print(f"[green]+ Tool Result ({tname}) [{time_ms:.1f}ms]:[/green] {out}")
+        console.print(f"[green]+ Result ({tname}) [{time_ms:.1f}ms]:[/green] {out}")
 
     elif evt.event_type == EventType.ERROR:
         err = evt.data.get("error")
         console.print(f"[bold red]! Error:[/bold red] {err}")
 
 
-async def _run_prompt(prompt: str, provider: str, max_steps: int):
-    console.print(f"[bold cyan]Loki Harness Starting[/bold cyan] (Model/Provider: [green]{provider}[/green])")
+async def _run_prompt(prompt: str, provider: str, max_steps: int) -> None:
+    console.print(f"[bold cyan]Loki Harness Starting[/bold cyan] (Provider: [green]{provider}[/green])")
     agent = LokiAgent(provider=provider, max_steps=max_steps)
     agent.add_listener(_render_event)
 
@@ -72,33 +77,11 @@ async def _run_prompt(prompt: str, provider: str, max_steps: int):
     console.print("\n" + "=" * 50)
     console.print(Panel(result.final_response, title="[bold green]Final Answer[/bold green]", border_style="green"))
     console.print(
-        f"[dim]Status: {result.status.value} | Total Steps: {len(result.steps)} | Tokens: {result.total_usage.total_tokens} | Time: {result.total_latency_ms:.1f}ms[/dim]\n"
+        f"[dim]Status: {result.status.value} | Steps: {len(result.steps)} | Tokens: {result.total_usage.total_tokens} | Latency: {result.total_latency_ms:.1f}ms[/dim]\n"
     )
 
 
-async def _chat_loop(provider: str, max_steps: int):
-    console.print("[bold cyan]Loki Interactive REPL[/bold cyan] (Type 'exit' or 'quit' to end)")
-    agent = LokiAgent(provider=provider, max_steps=max_steps)
-    agent.add_listener(_render_event)
-
-    session_id = "repl_session"
-
-    while True:
-        try:
-            user_input = console.input("\n[bold blue]user>[/bold blue] ").strip()
-            if not user_input:
-                continue
-            if user_input.lower() in ("exit", "quit"):
-                console.print("[dim]Goodbye![/dim]")
-                break
-
-            await agent.run(prompt=user_input, session_id=session_id)
-        except (KeyboardInterrupt, EOFError):
-            console.print("\n[dim]Session terminated.[/dim]")
-            break
-
-
-async def _run_eval(suite_path: str, provider: str):
+async def _run_eval(suite_path: str, provider: str) -> None:
     agent = LokiAgent(provider=provider)
     suite = BenchmarkSuite.from_json(suite_path)
     runner = EvalRunner(agent=agent)
@@ -107,7 +90,7 @@ async def _run_eval(suite_path: str, provider: str):
     runner.print_summary(summary)
 
 
-async def _test_model(provider_str: str):
+async def _test_model(provider_str: str) -> None:
     console.print(f"[bold cyan]Running Model Compatibility Suite for:[/bold cyan] {provider_str}")
     provider = get_provider(provider_str)
     tester = ModelCompatibilityTester(provider)
@@ -127,7 +110,7 @@ async def _test_model(provider_str: str):
     console.print(f"\n[bold]Overall Status:[/bold] {report.overall_status}\n")
 
 
-async def _list_models(provider_str: str):
+async def _list_models(provider_str: str) -> None:
     provider = get_provider(provider_str)
     if hasattr(provider, "list_models"):
         models = await provider.list_models()
@@ -140,84 +123,77 @@ async def _list_models(provider_str: str):
         console.print(f"Model listing not directly supported by {type(provider).__name__}. Active model: {provider.model}")
 
 
-def cli_entrypoint():
-    parser = argparse.ArgumentParser(description=f"Loki: Full-Stack Agent Harness Platform (v{__version__})")
+def cli_entrypoint() -> None:
+    parser = argparse.ArgumentParser(
+        prog="loki",
+        description=f"Loki: Autonomous AI Cybersecurity & Systems Research Agent (v{__version__})",
+    )
     parser.add_argument("-v", "--version", action="version", version=f"Loki {__version__}")
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    # Command: onboard (and setup)
-    onboard_parser = subparsers.add_parser("onboard", help="Run interactive onboarding wizard")
-    onboard_parser.add_argument("--reset", "-reset", action="store_true", help="Reset configuration and re-onboard")
+    # Command: run (execute single prompt)
+    run_parser = subparsers.add_parser("run", help="Run agent on a single prompt and exit")
+    run_parser.add_argument("prompt", type=str, help="Prompt or task instructions")
+    run_parser.add_argument("--provider", "-p", default=settings.default_provider, help="LLM Provider")
+    run_parser.add_argument("--max-steps", "-m", type=int, default=10, help="Maximum step cycles")
 
-    setup_parser = subparsers.add_parser("setup", help="Run interactive first-time setup wizard")
-    setup_parser.add_argument("--reset", "-reset", action="store_true", help="Reset configuration and re-onboard")
+    # Command: model (interactive arrow-key switcher or --list / --test)
+    model_parser = subparsers.add_parser("model", aliases=["models"], help="Select or inspect AI model")
+    model_parser.add_argument("model_id", nargs="?", default=None, help="Optional model identifier to set directly")
+    model_parser.add_argument("--list", "-l", action="store_true", help="List available models")
+    model_parser.add_argument("--test", "-t", action="store_true", help="Test model compatibility & tool calling")
+    model_parser.add_argument("--provider", "-p", default=settings.default_provider, help="Provider to query")
 
-    # Command: model (interactive arrow-key switcher)
-    subparsers.add_parser("model", help="Interactively select and change AI model using arrow keys")
+    # Command: setup (interactive setup wizard, onboard alias)
+    setup_parser = subparsers.add_parser("setup", aliases=["onboard"], help="Interactive setup & configuration wizard")
+    setup_parser.add_argument("--reset", action="store_true", help="Reset configuration and re-configure")
 
-    # Command: doctor
-    subparsers.add_parser("doctor", help="Run complete system health and platform diagnostics")
+    # Command: doctor (diagnostics)
+    subparsers.add_parser("doctor", help="Run platform diagnostics and system health check")
 
-    # Command: version
-    subparsers.add_parser("version", help="Show Loki version")
-
-    # Command: config
-    subparsers.add_parser("config", help="Inspect current configuration and active provider settings")
-
-    # Command: start (alias for serve)
-    start_parser = subparsers.add_parser("start", help="Start the Loki API and Web UI dashboard")
-    start_parser.add_argument("--host", default="127.0.0.1", help="Host interface")
-    start_parser.add_argument("--port", type=int, default=8000, help="Port to bind")
-
-    # Command: serve
-    serve_parser = subparsers.add_parser("serve", help="Launch FastAPI server and Web UI")
+    # Command: serve (starts web dashboard / API server, start alias)
+    serve_parser = subparsers.add_parser("serve", aliases=["start"], help="Start the Loki API and Web UI dashboard")
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host interface")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind")
 
-    # Command: run
-    run_parser = subparsers.add_parser("run", help="Run agent on a single prompt")
-    run_parser.add_argument("prompt", type=str, help="User prompt to execute")
-    run_parser.add_argument("--provider", "-p", default="mock", help="LLM Provider (e.g. nvidia, mock, gemini, openai)")
-    run_parser.add_argument("--max-steps", "-m", type=int, default=10, help="Maximum step cycles")
+    # Command: tools (list tools)
+    subparsers.add_parser("tools", help="List all registered tools in catalog")
 
-    # Command: chat
-    chat_parser = subparsers.add_parser("chat", help="Start an interactive chat session")
-    chat_parser.add_argument("--provider", "-p", default="mock", help="LLM Provider")
-    chat_parser.add_argument("--max-steps", "-m", type=int, default=10, help="Maximum step cycles")
-
-    # Command: eval
+    # Command: eval (benchmarks)
     eval_parser = subparsers.add_parser("eval", help="Run benchmark evaluation suites")
     eval_parser.add_argument("suite", type=str, help="Path to benchmark JSON file")
-    eval_parser.add_argument("--provider", "-p", default="mock", help="LLM Provider")
+    eval_parser.add_argument("--provider", "-p", default=settings.default_provider, help="LLM Provider")
 
-    # Command: models
-    models_parser = subparsers.add_parser("models", help="Model discovery and compatibility testing")
-    models_subparsers = models_parser.add_subparsers(dest="models_command", help="Model subcommands")
-    
-    m_list_parser = models_subparsers.add_parser("list", help="List available models")
-    m_list_parser.add_argument("--provider", "-p", default="nvidia", help="Provider to query")
+    # Command: config (view config)
+    subparsers.add_parser("config", help="Inspect current configuration and active provider settings")
 
-    m_test_parser = models_subparsers.add_parser("test", help="Test model compatibility & capabilities")
-    m_test_parser.add_argument("--provider", "-p", default="mock", help="Provider/model to probe (e.g. nvidia, mock, openai)")
-
-    # Command: tools
-    subparsers.add_parser("tools", help="List all registered tools")
+    # Command: chat (alias for interactive conversation)
+    chat_parser = subparsers.add_parser("chat", help="Start interactive conversational session")
+    chat_parser.add_argument("--provider", "-p", default=settings.default_provider, help="LLM Provider")
+    chat_parser.add_argument("--max-steps", "-m", type=int, default=10, help="Maximum step cycles")
 
     args = parser.parse_args()
 
-    if args.command in ("onboard", "setup"):
+    # Route subcommands
+    if args.command in ("setup", "onboard"):
         reset_flag = getattr(args, "reset", False)
         asyncio.run(run_setup_wizard(reset=reset_flag))
 
-    elif args.command == "model":
-        run_model_command()
+    elif args.command in ("model", "models"):
+        if getattr(args, "list", False):
+            asyncio.run(_list_models(args.provider))
+        elif getattr(args, "test", False):
+            asyncio.run(_test_model(args.provider))
+        elif getattr(args, "model_id", None):
+            from loki.cli.env_utils import update_env_file
+            update_env_file({"LOKI_MODEL": args.model_id, "NVIDIA_NIM_MODEL": args.model_id})
+            console.print(f"[bold green]✔ Model updated to:[/bold green] [bold cyan]{args.model_id}[/bold cyan]")
+        else:
+            run_model_command()
 
     elif args.command == "doctor":
         items = asyncio.run(LokiDoctor.run_diagnostics())
         LokiDoctor.display_report(items)
-
-    elif args.command == "version":
-        console.print(f"[bold cyan]Loki[/bold cyan] version [bold green]{__version__}[/bold green]")
 
     elif args.command == "config":
         console.print("\n[bold cyan]─── LOKI ACTIVE CONFIGURATION ───[/bold cyan]")
@@ -228,7 +204,7 @@ def cli_entrypoint():
             console.print(f" [bold]{k}:[/bold] {v}")
         console.print("")
 
-    elif args.command in ("start", "serve"):
+    elif args.command in ("serve", "start"):
         console.print(f"[bold green]Starting Loki Platform at http://{args.host}:{args.port}[/bold green]")
         uvicorn.run("loki.server.app:app", host=args.host, port=args.port, reload=False)
 
@@ -242,30 +218,21 @@ def cli_entrypoint():
     elif args.command == "eval":
         asyncio.run(_run_eval(args.suite, args.provider))
 
-    elif args.command == "models":
-        if args.models_command == "list":
-            asyncio.run(_list_models(args.provider))
-        elif args.models_command == "test":
-            asyncio.run(_test_model(args.provider))
-        else:
-            models_parser.print_help()
-
     elif args.command == "tools":
         agent = LokiAgent()
-        console.print(f"\n[bold cyan]Registered Tools ({len(agent.registry.list_tools())}):[/bold cyan]")
-        for t in agent.registry.list_tools():
+        tools = agent.registry.list_tools()
+        console.print(f"\n[bold cyan]Registered Tools ({len(tools)}):[/bold cyan]")
+        for t in tools:
             console.print(f" • [bold green]{t.name}[/bold green]: {t.description}")
         console.print("")
 
     else:
-        # Default behavior when running `loki` without arguments:
-        # Check if first-run setup is recommended
+        # Default behavior: running `loki` with no subcommands
         env_file = Path.cwd() / ".env"
         if not env_file.exists():
             console.print(
                 Panel(
-                    "[bold green]Welcome to Loki![/bold green] It looks like this is your first time running.\n"
-                    "Let's configure your AI provider (NVIDIA NIM, Gemini, OpenAI, or offline Mock).",
+                    "[bold green]Welcome to Loki![/bold green] Let's configure your AI provider.",
                     title="[bold cyan]First-Run Welcome[/bold cyan]",
                     border_style="cyan",
                 )
@@ -278,7 +245,7 @@ def cli_entrypoint():
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[dim]Skipping setup wizard.[/dim]")
 
-        # Launch Conversational Interface
+        # Launch conversational interface directly
         cli = LokiConversationalCLI()
         asyncio.run(cli.start())
 

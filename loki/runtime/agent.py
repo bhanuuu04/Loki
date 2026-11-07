@@ -16,6 +16,7 @@ from loki.tools.base import Tool
 from loki.tools.builtins import ALL_BUILTIN_TOOLS
 from loki.tools.security_tools import ALL_SECURITY_TOOLS
 from loki.tools.registry import ToolRegistry
+from loki.security.gateway import ExecutionGateway
 from loki.types import (
     AgentEvent,
     AgentStep,
@@ -33,7 +34,7 @@ You assist security engineers in conducting authorized security assessments, rec
 You have access to specialized security tools, knowledge bases (CWE, OWASP Top 10), and built-in reconnaissance modules.
 
 Operational Rules:
-1. Scope & Verification: Always ensure targets are authorized. When the user specifies or requests an assessment on a target in chat (e.g. "target is schoolknot.com", "schoolknot.com is in authorized scope", "find subdomains for example.com"), immediately authorize it using `authorize_target(target="...")` and proceed directly with the assessment.
+1. Scope & Authorization: You must operate strictly within the declared and authorized assessment scope. All tool executions are strictly mediated by the Execution Gateway and verified against authorized targets and CIDRs. Never attempt to expand scope or target out-of-scope assets autonomously.
 2. Built-in Tools: Always prefer built-in tools (e.g. enumerate_subdomains, dns_lookup, audit_http_security_headers) for reconnaissance instead of guessing external commands.
 3. System Environment: You operate in an interactive user shell without root/sudo access. Never run package manager installations (e.g. `apt-get install`, `dnf`, `brew`) as they fail due to permission locks. If an external tool is missing on PATH, use alternative built-in modules or inform the user how they can install it with sudo.
 4. Python Scripts: When using python_exec, write clean, robust, and complete Python scripts that handle exceptions gracefully and print concise results.
@@ -55,6 +56,7 @@ class LokiAgent:
         max_steps: int = 10,
         temperature: float = 0.2,
         memory_store: Optional[MemoryStore] = None,
+        gateway: Optional[ExecutionGateway] = None,
         include_builtins: bool = True,
         include_security_tools: bool = True,
     ):
@@ -70,7 +72,8 @@ class LokiAgent:
         self.temperature = temperature
         self.memory_store = memory_store or MemoryStore()
 
-        self.registry = ToolRegistry()
+        self.gateway = gateway or ExecutionGateway.get_default()
+        self.registry = ToolRegistry(gateway=self.gateway)
         if include_builtins:
             for bt in ALL_BUILTIN_TOOLS:
                 self.registry.register(bt)

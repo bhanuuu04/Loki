@@ -12,6 +12,7 @@ import re
 from loki.tools.base import tool
 from loki.security.scope_manager import ScopeManager, ScopeConfig
 from loki.security.policy_engine import PolicyEngine, ExecutionMode
+from loki.security.gateway import ExecutionGateway
 from loki.knowledge.cwe_database import lookup_cwe
 from loki.knowledge.owasp_knowledge import lookup_owasp
 from loki.knowledge.tool_registry.catalog import SecurityToolCatalog
@@ -39,28 +40,44 @@ process_executor = SecureProcessExecutor()
 assessment_store = AssessmentStore()
 
 
-@tool(name="authorize_target", description="Authorize a target host, domain, URL, or IP address for assessment when the user specifies it in chat.")
-def authorize_target(target: str) -> str:
-    """Authorize a target domain or IP."""
-    cleaned = re.sub(r"^https?://", "", target.strip()).split("/")[0].strip()
-    if ":" in cleaned:
-        cleaned = cleaned.split(":")[0]
+@tool(name="authorize_target", description="Check or verify authorization for a target under current assessment scope.")
+def authorize_target(target: str, authorization_token: Optional[str] = None) -> str:
+    """
+    Verify or explicitly authorize a target domain or IP.
+    Autonomous self-authorization by LLM reasoning is blocked to enforce scope correctness.
+    """
+    cleaned = scope_mgr.normalize_target(target)
     if not cleaned:
-        return "Error: Target identifier cannot be empty."
-    if cleaned not in scope_mgr.config.targets:
-        scope_mgr.config.targets.append(cleaned)
-        scope_mgr._init_rules()
-    return f"Target '{cleaned}' has been authorized under assessment scope. You may now perform reconnaissance or security audits on it."
+        return "Error: Target identifier cannot be empty or invalid."
+
+    in_scope, reason = scope_mgr.is_in_scope(cleaned)
+    if in_scope:
+        return f"Target '{cleaned}' is verified and within authorized assessment scope ({reason})."
+
+    # Require explicit operator authorization token
+    if authorization_token and authorization_token.strip():
+        scope_mgr.update_targets(
+            add_targets=[cleaned],
+            author="operator_token",
+            reason=f"Explicit authorization via token for {cleaned}",
+        )
+        return f"Target '{cleaned}' has been explicitly authorized under scope version {scope_mgr.config.version}."
+
+    return (
+        f"Authorization Denied: Target '{cleaned}' is not authorized. "
+        "Autonomous self-authorization by the model is disabled. "
+        "Targets must be explicitly initialized or authorized by the operator via configure_assessment_scope."
+    )
 
 
-@tool(name="configure_assessment_scope", description="Initialize or update authorized assessment scope and targets.")
+@tool(name="configure_assessment_scope", description="Explicitly initialize or update authorized assessment scope and targets.")
 def configure_scope(
     targets: Union[List[str], str],
     assessment_name: Optional[str] = None,
     excluded_targets: Optional[Union[List[str], str]] = None,
     execution_mode: str = "safe",
 ) -> str:
-    """Set the assessment scope and boundaries flexibly."""
+    """Set the assessment scope and boundaries with versioning and audit tracking."""
     if isinstance(targets, str):
         if "," in targets:
             target_list = [t.strip() for t in targets.split(",") if t.strip()]
@@ -71,12 +88,9 @@ def configure_scope(
     else:
         target_list = [str(targets).strip()]
 
-    # Clean protocols/ports from targets
     cleaned_targets = []
     for t in target_list:
-        c = re.sub(r"^https?://", "", t).split("/")[0].strip()
-        if ":" in c:
-            c = c.split(":")[0]
+        c = scope_mgr.normalize_target(t)
         if c:
             cleaned_targets.append(c)
 
@@ -86,9 +100,9 @@ def configure_scope(
     clean_excluded = []
     if excluded_targets:
         if isinstance(excluded_targets, str):
-            clean_excluded = [excluded_targets.strip()]
+            clean_excluded = [scope_mgr.normalize_target(e.strip()) for e in excluded_targets.split(",") if e.strip()]
         elif isinstance(excluded_targets, (list, tuple)):
-            clean_excluded = [str(e).strip() for e in excluded_targets]
+            clean_excluded = [scope_mgr.normalize_target(str(e)) for e in excluded_targets if str(e).strip()]
 
     name = assessment_name or f"Assessment-{cleaned_targets[0]}"
 
@@ -102,8 +116,11 @@ def configure_scope(
         excluded_targets=clean_excluded,
         allow_subdomains=True,
     )
-    scope_mgr.set_config(config)
+    scope_mgr.set_config(config, author="operator_configure_scope", reason=f"Configured {name}")
     policy_engine.set_mode(mode)
+
+    # Synchronize default ExecutionGateway
+    ExecutionGateway.set_default(ExecutionGateway(scope_manager=scope_mgr, policy_engine=policy_engine))
     
     # Initialize assessment session
     clean_sess_id = re.sub(r"[^a-zA-Z0-9_]", "_", name.lower())
@@ -116,7 +133,7 @@ def configure_scope(
     session.execution_mode = mode
     assessment_store.save_assessment(session)
 
-    return f"Scope successfully configured for '{name}'. Authorized Targets: {cleaned_targets}. Mode: {mode.value.upper()}."
+    return f"Scope successfully configured for '{name}'. Authorized Targets: {cleaned_targets}. Excluded: {clean_excluded}. Mode: {mode.value.upper()}."
 
 
 @tool(name="check_scope_authorization", description="Verify if a target host, IP, or URL is within the authorized assessment scope.")

@@ -1,6 +1,8 @@
 """
-Security Tool Registry Catalog.
-Stores documented tool knowledge and checks host installation status.
+Security Tool Registry Catalog for Loki 2.0.
+Stores documented tool knowledge, platform compatibility, tested status,
+output parser availability, and dynamic host installation checks.
+Incorporates HexStrike AI tools and patterns under MIT license attribution.
 """
 
 from typing import Dict, List, Optional
@@ -12,7 +14,7 @@ from loki.knowledge.tool_registry.models import (
     ToolCategory,
 )
 
-# Canonical catalog of primary security auditing tools
+# Canonical catalog of primary security auditing tools with rigorous status tracking
 INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
     SecurityToolEntry(
         name="nmap",
@@ -23,6 +25,11 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
         documentation_url="https://nmap.org/book/man.html",
         required_inputs=["target"],
         expected_outputs=["open_ports", "services", "os_fingerprints"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        execution_handler_available=True,
+        supported_platforms=["linux", "windows", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Fast Top 100 Port Discovery (Non-intrusive)",
@@ -38,13 +45,6 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
                 description="Performs service version detection and runs default safe NSE scripts.",
                 risk_level="medium",
             ),
-            CommandTemplate(
-                purpose="Specific Port Verification",
-                syntax="nmap -p {ports} -sV {target}",
-                args=["-p", "{ports}", "-sV"],
-                description="Inspects specified ports for running services and version banners.",
-                risk_level="low",
-            ),
         ],
     ),
     SecurityToolEntry(
@@ -56,6 +56,10 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
         documentation_url="https://cirt.net/Nikto2",
         required_inputs=["target"],
         expected_outputs=["http_options", "outdated_components", "dangerous_files"],
+        documented_status=True,
+        tested_status=False,
+        output_parser_availability=False,
+        supported_platforms=["linux", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Standard Web Server Configuration Audit",
@@ -64,56 +68,50 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
                 description="Audits web server headers, server identification, and configuration misconfigurations.",
                 risk_level="medium",
             ),
-            CommandTemplate(
-                purpose="SSL/TLS Web Audit",
-                syntax="nikto -h {target} -ssl",
-                args=["-h", "{target}", "-ssl"],
-                description="Scans an HTTPS target checking SSL cipher and certificate configuration.",
-                risk_level="medium",
-            ),
         ],
     ),
     SecurityToolEntry(
         name="whatweb",
         category=ToolCategory.WEB_APPLICATION,
-        description="Next-generation web scanner identifying technologies, CMSs, blogging platforms, JavaScript libraries, and web servers.",
+        description="Next-generation web scanner identifying technologies, CMSs, blogging platforms, and web servers.",
         binary_name="whatweb",
         installation_method="apt install whatweb / gem install whatweb",
         documentation_url="https://github.com/urbanadventurer/WhatWeb",
         required_inputs=["target"],
         expected_outputs=["technologies", "cms", "frameworks", "headers"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        supported_platforms=["linux", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Passive Web Technology Fingerprinting",
                 syntax="whatweb -a 1 {target}",
                 args=["-a", "1", "{target}"],
-                description="Stealthy passive fingerprinting based solely on the homepage response headers and body.",
+                description="Stealthy passive fingerprinting based solely on homepage response headers and body.",
                 risk_level="low",
-            ),
-            CommandTemplate(
-                purpose="Detailed Technology Identification",
-                syntax="whatweb -a 3 --color=never {target}",
-                args=["-a", "3", "--color=never", "{target}"],
-                description="Active technology inspection examining plugins, headers, and specific endpoint fingerprints.",
-                risk_level="medium",
             ),
         ],
     ),
     SecurityToolEntry(
         name="whois",
         category=ToolCategory.INFORMATION_GATHERING,
-        description="Client for the WHOIS directory service providing domain ownership and IP allocation data.",
+        description="Client for WHOIS directory service providing domain ownership and IP allocation data.",
         binary_name="whois",
         installation_method="apt install whois",
         documentation_url="https://linux.die.net/man/1/whois",
         required_inputs=["target"],
         expected_outputs=["registrar", "creation_date", "nameservers", "ip_blocks"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=False,
+        supported_platforms=["linux", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Domain Registration Query",
                 syntax="whois {target}",
                 args=["{target}"],
-                description="Queries authoritative WHOIS servers for domain registration and nameserver details.",
+                description="Queries authoritative WHOIS servers for domain registration details.",
                 risk_level="low",
             )
         ],
@@ -127,21 +125,18 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
         documentation_url="https://linux.die.net/man/1/dig",
         required_inputs=["target"],
         expected_outputs=["a_records", "mx_records", "txt_records", "ns_records"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        supported_platforms=["linux", "darwin", "windows"],
         commands=[
             CommandTemplate(
                 purpose="Comprehensive DNS Records Query",
                 syntax="dig {target} ANY +noall +answer",
                 args=["{target}", "ANY", "+noall", "+answer"],
-                description="Retrieves all available DNS records (A, MX, TXT, NS, CNAME) for the host.",
+                description="Retrieves all available DNS records for the host.",
                 risk_level="low",
-            ),
-            CommandTemplate(
-                purpose="Mail Exchange Records Verification",
-                syntax="dig {target} MX +short",
-                args=["{target}", "MX", "+short"],
-                description="Fetches mail servers handling incoming email for target domain.",
-                risk_level="low",
-            ),
+            )
         ],
     ),
     SecurityToolEntry(
@@ -153,12 +148,16 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
         documentation_url="https://github.com/aboul3la/Sublist3r",
         required_inputs=["target"],
         expected_outputs=["subdomains"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        supported_platforms=["linux", "windows", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Passive Subdomain Discovery",
                 syntax="sublist3r -d {target} -t 10",
                 args=["-d", "{target}", "-t", "10"],
-                description="Gathers subdomains passively via search engines and Netcraft without sending packets to target.",
+                description="Gathers subdomains passively via search engines.",
                 risk_level="low",
             )
         ],
@@ -172,88 +171,132 @@ INITIAL_TOOL_CATALOG: List[SecurityToolEntry] = [
         documentation_url="https://github.com/ffuf/ffuf",
         required_inputs=["target", "wordlist"],
         expected_outputs=["discovered_paths", "status_codes", "content_lengths"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        supported_platforms=["linux", "windows", "darwin"],
         commands=[
             CommandTemplate(
                 purpose="Controlled Directory and Route Discovery",
                 syntax="ffuf -u {target}/FUZZ -w {wordlist} -mc 200,301,302,403 -rate 50",
                 args=["-u", "{target}/FUZZ", "-w", "{wordlist}", "-mc", "200,301,302,403", "-rate", "50"],
-                description="Scans for accessible endpoints under target URL with controlled rate limiting (50 req/s).",
+                description="Scans for accessible endpoints under target URL.",
+                risk_level="medium",
+            )
+        ],
+    ),
+    # HexStrike AI inspired additions with verified metadata & capability flags
+    SecurityToolEntry(
+        name="nuclei",
+        category=ToolCategory.VULNERABILITY_ANALYSIS,
+        description="Fast and customizable vulnerability scanner based on simple YAML DSL templates.",
+        binary_name="nuclei",
+        installation_method="go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+        documentation_url="https://docs.projectdiscovery.io/tools/nuclei",
+        required_inputs=["target"],
+        expected_outputs=["vulnerabilities", "cves", "misconfigurations"],
+        documented_status=True,
+        tested_status=True,
+        output_parser_availability=True,
+        supported_platforms=["linux", "windows", "darwin"],
+        commands=[
+            CommandTemplate(
+                purpose="Template-based Security Scan",
+                syntax="nuclei -u {target} -severity low,medium -jsonl",
+                args=["-u", "{target}", "-severity", "low,medium", "-jsonl"],
+                description="Scans target using validated community templates with JSONL structured reporting.",
                 risk_level="medium",
             )
         ],
     ),
     SecurityToolEntry(
-        name="trivy",
-        category=ToolCategory.CONTAINER_CLOUD,
-        description="Comprehensive vulnerability and misconfiguration scanner for containers, filesystems, and Git repos.",
-        binary_name="trivy",
-        installation_method="apt install trivy / brew install trivy",
-        documentation_url="https://aquasecurity.github.io/trivy/",
-        required_inputs=["target"],
-        expected_outputs=["cves", "misconfigurations", "vulnerable_libraries"],
+        name="gobuster",
+        category=ToolCategory.FUZZING,
+        description="Directory, file, DNS, and vhost busting tool written in Go.",
+        binary_name="gobuster",
+        installation_method="apt install gobuster / go install github.com/OJ/gobuster/v3@latest",
+        documentation_url="https://github.com/OJ/gobuster",
+        required_inputs=["target", "wordlist"],
+        expected_outputs=["discovered_urls", "status_codes"],
+        documented_status=True,
+        tested_status=False,
+        output_parser_availability=False,
+        supported_platforms=["linux", "windows", "darwin"],
         commands=[
             CommandTemplate(
-                purpose="Filesystem and Dependency Vulnerability Scan",
-                syntax="trivy fs --severity HIGH,CRITICAL {target}",
-                args=["fs", "--severity", "HIGH,CRITICAL", "{target}"],
-                description="Scans project directory for vulnerable dependencies with known High and Critical CVEs.",
+                purpose="Directory Enumeration",
+                syntax="gobuster dir -u {target} -w {wordlist} -q",
+                args=["dir", "-u", "{target}", "-w", "{wordlist}", "-q"],
+                description="Fast brute forcing of web paths and directories.",
+                risk_level="medium",
+            )
+        ],
+    ),
+    SecurityToolEntry(
+        name="sqlmap",
+        category=ToolCategory.DATABASE_ASSESSMENT,
+        description="Automatic SQL injection and database takeover tool.",
+        binary_name="sqlmap",
+        installation_method="apt install sqlmap / pip install sqlmap",
+        documentation_url="https://sqlmap.org/",
+        required_inputs=["url"],
+        expected_outputs=["injectable_parameters", "database_type"],
+        documented_status=True,
+        tested_status=False,
+        output_parser_availability=False,
+        supported_platforms=["linux", "windows", "darwin"],
+        commands=[
+            CommandTemplate(
+                purpose="Passive Parameter Injection Detection",
+                syntax="sqlmap -u {url} --batch --level=1 --risk=1",
+                args=["-u", "{url}", "--batch", "--level=1", "--risk=1"],
+                description="Tests parameters for standard SQL injection vulnerability in safe non-destructive mode.",
+                risk_level="high",
+            )
+        ],
+    ),
+    SecurityToolEntry(
+        name="amass",
+        category=ToolCategory.INFORMATION_GATHERING,
+        description="In-depth attack surface mapping and network asset discovery tool.",
+        binary_name="amass",
+        installation_method="apt install amass / go install github.com/owasp-amass/amass/v4/...@master",
+        documentation_url="https://github.com/owasp-amass/amass",
+        required_inputs=["domain"],
+        expected_outputs=["subdomains", "asns", "netblocks"],
+        documented_status=True,
+        tested_status=False,
+        output_parser_availability=False,
+        supported_platforms=["linux", "windows", "darwin"],
+        commands=[
+            CommandTemplate(
+                purpose="Passive Network and Subdomain Enum",
+                syntax="amass enum -passive -d {domain}",
+                args=["enum", "-passive", "-d", "{domain}"],
+                description="Passive asset discovery without touching target infrastructure.",
                 risk_level="low",
             )
         ],
     ),
     SecurityToolEntry(
-        name="semgrep",
-        category=ToolCategory.VULNERABILITY_ANALYSIS,
-        description="Fast, open-source static analysis engine for finding bugs and enforcing code security standards.",
-        binary_name="semgrep",
-        installation_method="pip install semgrep",
-        documentation_url="https://semgrep.dev/docs/",
+        name="wafw00f",
+        category=ToolCategory.WEB_APPLICATION,
+        description="Identifies and fingerprints Web Application Firewall (WAF) products protecting a website.",
+        binary_name="wafw00f",
+        installation_method="pip install wafw00f / apt install wafw00f",
+        documentation_url="https://github.com/EnableSecurity/wafw00f",
         required_inputs=["target"],
-        expected_outputs=["code_vulnerabilities", "cwe_matches"],
+        expected_outputs=["waf_detected", "waf_vendor"],
+        documented_status=True,
+        tested_status=False,
+        output_parser_availability=False,
+        supported_platforms=["linux", "windows", "darwin"],
         commands=[
             CommandTemplate(
-                purpose="Static Code Security Audit (OWASP Top 10 rules)",
-                syntax="semgrep scan --config=auto {target}",
-                args=["scan", "--config=auto", "{target}"],
-                description="Scans source code directory for insecure functions, hardcoded secrets, and injection vulnerabilities.",
-                risk_level="low",
-            )
-        ],
-    ),
-    SecurityToolEntry(
-        name="sslscan",
-        category=ToolCategory.CRYPTOGRAPHY,
-        description="Fast SSL/TLS cipher suite and certificate scanner.",
-        binary_name="sslscan",
-        installation_method="apt install sslscan",
-        documentation_url="https://github.com/rbsec/sslscan",
-        required_inputs=["target"],
-        expected_outputs=["supported_ciphers", "tls_versions", "certificate_validity"],
-        commands=[
-            CommandTemplate(
-                purpose="SSL/TLS Cipher Suite and Protocol Security Audit",
-                syntax="sslscan --no-failed {target}",
-                args=["--no-failed", "{target}"],
-                description="Tests target for weak TLS 1.0/1.1 protocols, insecure cipher suites, and certificate flaws.",
-                risk_level="low",
-            )
-        ],
-    ),
-    SecurityToolEntry(
-        name="testssl",
-        category=ToolCategory.CRYPTOGRAPHY,
-        description="Command line tool which checks a server's service on any port for the support of TLS/SSL ciphers.",
-        binary_name="testssl.sh",
-        installation_method="apt install testssl.sh",
-        documentation_url="https://testssl.sh/",
-        required_inputs=["target"],
-        expected_outputs=["vulnerabilities", "cipher_rankings", "certificate_details"],
-        commands=[
-            CommandTemplate(
-                purpose="Comprehensive SSL/TLS Vulnerability Check (Heartbleed, POODLE, Robot)",
-                syntax="testssl.sh --fast {target}",
-                args=["--fast", "{target}"],
-                description="Audits SSL/TLS implementations for known protocol vulnerabilities.",
+                purpose="WAF Detection and Identification",
+                syntax="wafw00f {target}",
+                args=["{target}"],
+                description="Sends benign HTTP probes to detect WAF behavioral responses.",
                 risk_level="low",
             )
         ],

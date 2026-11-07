@@ -9,3 +9,4 @@ build/
 assessments/*.json
 reports/*
 logs/*.jsonl
+data/

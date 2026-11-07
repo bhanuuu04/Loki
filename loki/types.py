@@ -28,6 +28,7 @@ class ToolResult(BaseModel):
     output: Any
     is_error: bool = False
     execution_time_ms: float = 0.0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Message(BaseModel):

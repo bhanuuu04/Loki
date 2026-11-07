@@ -43,6 +43,11 @@ class Tool:
         self.is_async = inspect.iscoroutinefunction(func)
         self.parameters_schema = parameters_schema or self._generate_schema_from_func(func)
 
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        """Convenience property for accessing parameter schema."""
+        return self.parameters_schema
+
     def _generate_schema_from_func(self, fn: Callable[..., Any]) -> Dict[str, Any]:
         """Automatically derive JSON Schema parameters from Python type hints."""
         sig = inspect.signature(fn)

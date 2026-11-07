@@ -183,7 +183,7 @@ def select_from_menu(
         _render_menu_panel(title, options, current_idx, descriptions),
         console=console,
         auto_refresh=False,
-        transient=False,
+        transient=True,
     ) as live:
         while True:
             live.update(_render_menu_panel(title, options, current_idx, descriptions))

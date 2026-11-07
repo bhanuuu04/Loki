@@ -1,18 +1,20 @@
 """
 Hermes-Style Interactive Conversational Terminal Interface for Loki.
+Direct, clean, and unique terminal interface with high-fidelity telemetry,
+banner art, and real-time execution feedback.
 """
 
+from typing import Any, Dict, Optional
 import asyncio
 import os
 import sys
 import time
 import re
-from typing import Any, Dict
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.markdown import Markdown
-from rich.live import Live
+from rich.rule import Rule
 from rich import box
 
 from loki import __version__
@@ -28,12 +30,14 @@ from loki.types import AgentEvent, EventType, RunResult, RunStatus
 
 console = Console(force_terminal=True)
 
-
-BANNER = f"""
-[bold cyan]╦  ╔═╗╦╔═╦[/bold cyan]   [bold white]AI Cybersecurity Agent[/bold white]
-[bold cyan]║  ║ ║╠╩╗║[/bold cyan]   [dim]v{__version__} • Standalone Runtime[/dim]
-[bold cyan]╩═╝╚═╝╩ ╩╩[/bold cyan]   [dim]Type /help for slash commands[/dim]
-"""
+HERMES_BANNER = r"""[bold cyan]
+  ██╗      ██████╗ ██╗  ██╗██╗    ██████╗      ██████╗ 
+  ██║     ██╔═══██╗██║ ██╔╝██║    ╚════██╗    ██╔═████╗
+  ██║     ██║   ██║█████═╝ ██║     █████╔╝    ██║██╔██║
+  ██║     ██║   ██║██╔═██╗ ██║    ██╔═══╝     ████╔╝██║
+  ███████╗╚██████╔╝██║ ╚██╗██║    ███████╗██╗ ╚██████╔╝
+  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝    ╚══════╝╚═╝  ╚═════╝ 
+[/bold cyan]"""
 
 
 class LokiConversationalCLI:
@@ -55,14 +59,32 @@ class LokiConversationalCLI:
 
         self.scope_manager = scope_mgr
         if "127.0.0.1" not in self.scope_manager.config.targets:
-            self.scope_manager.config.targets.extend(["127.0.0.1", "localhost"])
-            self.scope_manager._init_rules()
+            self.scope_manager.update_targets(
+                add_targets=["127.0.0.1", "localhost"],
+                author="cli_init",
+                reason="Default local loopback authorization",
+            )
 
         self.agent = LokiAgent(
             provider=get_provider(self.provider_name, model=self.model_name),
             max_steps=settings.max_steps,
         )
         self.agent.add_listener(self._on_agent_event)
+
+    def _safe_print(self, renderable: Any) -> None:
+        """
+        Safely prints to console while status spinner is active.
+        Prevents Windows CMD/PowerShell cursor collisions and ghost text.
+        """
+        if self._status_spinner:
+            try:
+                self._status_spinner.stop()
+                console.print(renderable)
+                self._status_spinner.start()
+            except Exception:
+                console.print(renderable)
+        else:
+            console.print(renderable)
 
     def _format_tool_call(self, tname: str, args: Dict[str, Any]) -> str:
         """Formats tool invocation into a clean human-readable action."""
@@ -76,12 +98,12 @@ class LokiConversationalCLI:
             return f"[bold cyan]⚡ Python Script:[/bold cyan] [dim]{preview}[/dim]"
         elif tname == "enumerate_subdomains":
             domain = args.get("domain", "")
-            return f"[bold cyan]⚡ Subdomain Reconnaissance:[/bold cyan] [bold white]{domain}[/bold white]"
+            return f"[bold cyan]⚡ Reconnaissance:[/bold cyan] [bold white]{domain}[/bold white]"
         elif tname == "authorize_target":
             target = args.get("target", "")
-            return f"[bold cyan]⚡ Authorizing Target:[/bold cyan] [bold white]{target}[/bold white]"
+            return f"[bold cyan]⚡ Scope Check:[/bold cyan] [bold white]{target}[/bold white]"
         elif tname == "dns_lookup":
-            domain = args.get("domain", "")
+            domain = args.get("host", args.get("domain", ""))
             return f"[bold cyan]⚡ DNS Query:[/bold cyan] [bold white]{domain}[/bold white]"
         elif tname == "search_security_tool_catalog":
             query = args.get("query", "")
@@ -105,7 +127,6 @@ class LokiConversationalCLI:
         raw_str = str(output).strip()
         clean_str = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw_str).strip()
 
-        # Command specific formatting
         if tname == "run_command":
             if "exit code: 0" in clean_str.lower():
                 content = clean_str
@@ -113,15 +134,15 @@ class LokiConversationalCLI:
                     content = content.split("STDOUT:\n", 1)[1]
                 lines = [l for l in content.splitlines() if l.strip()]
                 if not lines:
-                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms, no output)[/dim]"
+                    return f" [green]✔ Completed[/green] [dim]({time_ms:.1f}ms, no output)[/dim]"
                 elif len(lines) == 1:
-                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:120]}[/dim]"
+                    return f" [green]✔ Completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:120]}[/dim]"
                 else:
-                    return f" [green]✔ Command completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:90]} (+{len(lines)-1} more lines)[/dim]"
+                    return f" [green]✔ Completed[/green] [dim]({time_ms:.1f}ms): {lines[0][:90]} (+{len(lines)-1} lines)[/dim]"
             else:
                 lines = [l for l in clean_str.splitlines() if l.strip()]
                 err_summary = lines[0] if lines else "Non-zero exit"
-                return f" [yellow]! Command notice[/yellow] [dim]({time_ms:.1f}ms): {err_summary[:120]}[/dim]"
+                return f" [yellow]! Notice[/yellow] [dim]({time_ms:.1f}ms): {err_summary[:120]}[/dim]"
 
         if tname == "enumerate_subdomains":
             lines = [l for l in clean_str.splitlines() if l.strip()]
@@ -136,70 +157,115 @@ class LokiConversationalCLI:
             preview += f" [dim](+{len(lines)-1} more lines)[/dim]"
         return f" [green]✔ {tname} completed[/green] [dim]({time_ms:.1f}ms):[/dim] {preview}"
 
-    def _on_agent_event(self, evt: AgentEvent):
-        """Displays real-time tool progress and thoughts cleanly."""
+    def _on_agent_event(self, evt: AgentEvent) -> None:
+        """Displays real-time tool progress and thoughts cleanly without terminal tearing."""
         if evt.event_type == EventType.TOOL_CALL_START:
             tname = evt.data.get("tool_name", "")
             args = evt.data.get("arguments", {})
-            if self._status_spinner:
-                self._status_spinner.update(f"[bold cyan]Loki is running {tname}...[/bold cyan]")
             call_line = self._format_tool_call(tname, args)
-            console.print(f" {call_line}")
+            self._safe_print(f" {call_line}")
+            if self._status_spinner:
+                self._status_spinner.update(f"[bold cyan]Running {tname}...[/bold cyan]")
 
         elif evt.event_type == EventType.TOOL_CALL_END:
             tname = evt.data.get("tool_name", "")
             res = evt.data.get("output", "")
             time_ms = evt.data.get("execution_time_ms", 0.0)
-            if self._status_spinner:
-                self._status_spinner.update("[bold cyan]Loki is analyzing results...[/bold cyan]")
             res_line = self._format_tool_result(tname, res, time_ms)
-            console.print(res_line)
+            self._safe_print(res_line)
+            if self._status_spinner:
+                self._status_spinner.update("[bold cyan]Analyzing observations...[/bold cyan]")
 
         elif evt.event_type == EventType.STEP_START:
             step_num = evt.data.get("step_number", 1)
             if self._status_spinner:
-                self._status_spinner.update(f"[bold cyan]Loki is thinking (step {step_num})...[/bold cyan]")
+                self._status_spinner.update(f"[bold cyan]Reasoning cycle (step {step_num})...[/bold cyan]")
+
+        elif evt.event_type == EventType.THOUGHT:
+            thought = evt.data.get("thought", "").strip()
+            if thought and len(thought) > 10:
+                preview = thought.replace("\n", " ")[:130]
+                self._safe_print(f" [dim italic]Thinking: {preview}...[/dim italic]")
 
         elif evt.event_type == EventType.ERROR:
             err = evt.data.get("error")
-            console.print(f" [bold red]! Error:[/bold red] {err}")
+            self._safe_print(f" [bold red]! Error:[/bold red] {err}")
 
-    def display_header(self):
-        console.print(BANNER)
+    def display_header(self) -> None:
+        """Renders the unique Hermes-style intro banner and telemetry grid."""
+        console.print(HERMES_BANNER)
         console.print(
-            f" [dim]Provider:[/dim] [green]{self.provider_name}[/green] │ "
-            f"[dim]Model:[/dim] [green]{self.model_name}[/green] │ "
-            f"[dim]Mode:[/dim] [yellow]{self.mode.value.upper()}[/yellow] │ "
-            f"[dim]Session:[/dim] [dim]{self.session_id}[/dim]\n"
+            " [bold white]LOKI 2.0[/bold white] [dim]•[/dim] "
+            "[bold cyan]AUTONOMOUS CYBERSECURITY RESEARCH AGENT[/bold cyan] [dim]•[/dim] "
+            f"[dim]v{__version__}[/dim]\n"
+        )
+
+        # Hermes Telemetry Card
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1)
+        grid.add_column(ratio=1)
+
+        # Left Column
+        left_text = (
+            f" [dim]Provider:[/dim] [bold green]{self.provider_name}[/bold green]\n"
+            f" [dim]AI Model:[/dim] [bold cyan]{self.model_name}[/bold cyan]\n"
+            f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]"
+        )
+
+        # Right Column
+        targets_count = len(self.scope_manager.config.targets)
+        right_text = (
+            f" [dim]Target Scope:[/dim] [bold green]{targets_count} Authorized[/bold green]\n"
+            f" [dim]Execution Gateway:[/dim] [bold green]ENFORCED (Single Choke-Point)[/bold green]\n"
+            f" [dim]Session ID:[/dim] [dim]{self.session_id}[/dim]"
+        )
+
+        grid.add_row(left_text, right_text)
+
+        telemetry_panel = Panel(
+            grid,
+            title="[bold cyan]SYSTEM TELEMETRY[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+        console.print(telemetry_panel)
+
+        console.print(
+            " [dim]Quick Commands:[/dim] "
+            "[cyan]/help[/cyan] [dim]•[/dim] "
+            "[cyan]/model[/cyan] [dim]•[/dim] "
+            "[cyan]/scope[/cyan] [dim]•[/dim] "
+            "[cyan]/tools[/cyan] [dim]•[/dim] "
+            "[cyan]/mode[/cyan] [dim]•[/dim] "
+            "[cyan]/clear[/cyan] [dim]•[/dim] "
+            "[cyan]exit[/cyan]\n"
         )
 
     def handle_command(self, cmd: str) -> bool:
-        """
-        Processes slash commands. Returns False if user requested exit, True otherwise.
-        """
+        """Processes slash commands. Returns False if user requested exit, True otherwise."""
         parts = cmd.strip().split(maxsplit=1)
         sub = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
 
-        if sub in ("/exit", "/quit", "/q"):
+        if sub in ("/exit", "/quit", "/q", "exit", "quit"):
             console.print("[dim]Exiting Loki session. Goodbye![/dim]\n")
             return False
 
         elif sub == "/help":
-            console.print("\n[bold cyan]Available Slash Commands:[/bold cyan]")
+            console.print("\n[bold cyan]Available Commands:[/bold cyan]")
             table = Table(box=box.SIMPLE)
-            table.add_column("Command", style="green", width=18)
+            table.add_column("Command", style="green", width=22)
             table.add_column("Description")
-            table.add_row("/help", "Show this cheat sheet")
-            table.add_row("/model <id>", "Switch active AI model on the fly")
-            table.add_row("/provider <name>", "Switch LLM provider (nvidia, mock, gemini, openai, ollama)")
-            table.add_row("/mode <name>", "Switch execution mode (safe, aggressive, advanced_audit)")
-            table.add_row("/scope <target>", "Inspect or add target host/IP to authorized scope")
-            table.add_row("/tools", "List all available security and system tools")
-            table.add_row("/status", "Show active session telemetry, tokens, and health")
-            table.add_row("/history", "View conversation history for this session")
+            table.add_row("/model [id]", "Interactively pick or switch active AI model")
+            table.add_row("/provider [name]", "Switch provider (nvidia, mock, gemini, openai, ollama)")
+            table.add_row("/mode [safe|aggressive]", "Switch execution policy mode")
+            table.add_row("/scope [add|exclude target]", "Inspect or update authorized target scope")
+            table.add_row("/tools", "List registered security tools")
+            table.add_row("/status", "Show active session telemetry & token usage")
+            table.add_row("/history", "View conversation history")
+            table.add_row("/reset", "Clear conversation memory and start fresh session")
             table.add_row("/clear", "Clear terminal screen")
-            table.add_row("/exit, /quit", "End conversational session")
+            table.add_row("/exit, /quit", "End session")
             console.print(table)
             console.print("")
 
@@ -224,6 +290,7 @@ class LokiConversationalCLI:
             else:
                 self.provider_name = arg.lower()
                 self.agent.provider = get_provider(self.provider_name, model=self.model_name)
+                update_env_file({"LOKI_PROVIDER": self.provider_name})
                 console.print(f"[bold green]✔ Provider updated to:[/bold green] {self.provider_name}")
 
         elif sub == "/mode":
@@ -236,17 +303,27 @@ class LokiConversationalCLI:
         elif sub == "/scope":
             if not arg:
                 targets = self.scope_manager.config.targets
-                console.print(f"\n[bold cyan]Authorized Target Scope ({len(targets)}):[/bold cyan]")
+                exclusions = self.scope_manager.config.excluded_targets
+                console.print(f"\n[bold cyan]Authorized Scope Targets ({len(targets)}) [v{self.scope_manager.config.version}]:[/bold cyan]")
                 for t in targets:
                     console.print(f" • [green]{t}[/green]")
-                console.print("[dim]Use /scope add <host|ip|cidr> to authorize new targets.[/dim]\n")
+                if exclusions:
+                    console.print(f"\n[bold red]Excluded Scope Targets ({len(exclusions)}):[/bold red]")
+                    for e in exclusions:
+                        console.print(f" • [red]{e}[/red]")
+                console.print("\n[dim]Commands: /scope add <host|ip|cidr> | /scope exclude <host|ip>[/dim]\n")
+            elif arg.startswith("exclude ") or arg.startswith("rm "):
+                target_to_ex = arg.split(maxsplit=1)[1].strip()
+                clean = self.scope_manager.normalize_target(target_to_ex)
+                if clean:
+                    self.scope_manager.update_targets(add_exclusions=[clean], author="cli_user")
+                    console.print(f"[bold red]✔ Added to excluded scope:[/bold red] [bold red]{clean}[/bold red]")
             else:
-                target_to_add = arg.replace("add", "").strip() if arg.startswith("add ") else arg.strip()
-                if target_to_add:
-                    if target_to_add not in self.scope_manager.config.targets:
-                        self.scope_manager.config.targets.append(target_to_add)
-                        self.scope_manager._init_rules()
-                    console.print(f"[bold green]✔ Added to authorized scope:[/bold green] [bold cyan]{target_to_add}[/bold cyan]")
+                target_to_add = arg.replace("add", "", 1).strip() if arg.startswith("add ") else arg.strip()
+                clean = self.scope_manager.normalize_target(target_to_add)
+                if clean:
+                    self.scope_manager.update_targets(add_targets=[clean], author="cli_user")
+                    console.print(f"[bold green]✔ Added to authorized scope (v{self.scope_manager.config.version}):[/bold green] [bold cyan]{clean}[/bold cyan]")
 
         elif sub == "/tools":
             tools = self.agent.registry.list_tools()
@@ -263,8 +340,14 @@ class LokiConversationalCLI:
             console.print(f" • Active Model: {self.model_name}")
             console.print(f" • Execution Mode: {self.mode.value.upper()}\n")
 
+        elif sub == "/reset":
+            self.session_id = f"cli_{int(time.time())}"
+            self.turn_count = 0
+            self.total_tokens_used = 0
+            console.print("[bold green]✔ Session memory reset. Starting new conversation.[/bold green]\n")
+
         elif sub == "/clear":
-            os.system("cls" if os.name == "nt" else "clear")
+            console.clear()
             self.display_header()
 
         elif sub == "/history":
@@ -274,7 +357,7 @@ class LokiConversationalCLI:
                 if m.role.value == "system":
                     continue
                 role_color = "blue" if m.role.value == "user" else "green"
-                txt = m.content or ""
+                txt = (m.content or "").strip()
                 preview = txt[:120] + "..." if len(txt) > 120 else txt
                 console.print(f"[[{role_color}]{m.role.value.upper()}[/{role_color}]]: {preview}")
             console.print("")
@@ -284,18 +367,19 @@ class LokiConversationalCLI:
 
         return True
 
-    async def start(self):
+    async def start(self) -> None:
         """Starts the interactive Hermes-style conversation loop."""
         self.display_header()
 
         while True:
             try:
-                user_input = console.input("[bold blue]loki>[/bold blue] ").strip()
+                # Hermes-style interactive prompt
+                user_input = console.input(f"[bold cyan]loki[/bold cyan][dim]@{self.session_id[-6:]}[/dim] [bold yellow]❯[/bold yellow] ").strip()
                 if not user_input:
                     continue
 
-                # Handle slash commands
-                if user_input.startswith("/"):
+                # Handle slash commands and direct exit/quit words
+                if user_input.startswith("/") or user_input.lower() in ("exit", "quit"):
                     should_continue = self.handle_command(user_input)
                     if not should_continue:
                         break
@@ -323,22 +407,21 @@ class LokiConversationalCLI:
                     err_text = result.error_message or result.final_response or "Unknown runtime error."
                     console.print(
                         Panel(
-                            f"[bold red]Execution Error:[/bold red] {err_text}\n\n"
-                            f"[yellow]Troubleshooting Tips:[/yellow]\n"
-                            f" • Check your API key or reconfigure: [bold cyan]loki onboard[/bold cyan]\n"
-                            f" • Switch model: [bold cyan]/model[/bold cyan] or [bold cyan]loki model[/bold cyan]\n"
-                            f" • Use offline mock provider: [bold cyan]/provider mock[/bold cyan]\n"
-                            f" • Run environment diagnostics: [bold cyan]loki doctor[/bold cyan]",
-                            title="[bold red]Agent Encountered an Issue[/bold red]",
+                            f"[bold red]Execution Notice:[/bold red] {err_text}\n\n"
+                            f"[yellow]Quick Actions:[/yellow]\n"
+                            f" • Switch model: [bold cyan]/model[/bold cyan]\n"
+                            f" • Switch to mock provider: [bold cyan]/provider mock[/bold cyan]\n"
+                            f" • Run diagnostics: [bold cyan]loki doctor[/bold cyan]",
+                            title="[bold red]Action Required[/bold red]",
                             border_style="red",
                         )
                     )
                 elif result.final_response:
+                    console.print(f"\n[dim]───[/dim] [bold cyan]✦ Loki Analysis[/bold cyan] [dim]({result.total_latency_ms:.0f}ms • {result.total_usage.total_tokens} tokens)[/dim] [dim]──────────────────────────────────────[/dim]")
                     console.print(Markdown(result.final_response))
+                    console.print(f"[dim]────────────────────────────────────────────────────────────────────────────[/dim]\n")
                 else:
                     console.print("[dim](No response content returned)[/dim]")
-
-                console.print("")
 
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[dim]Session terminated.[/dim]")
