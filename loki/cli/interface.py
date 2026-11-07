@@ -214,7 +214,6 @@ class LokiConversationalCLI:
             f" [dim]Provider:[/dim] [bold green]{self.provider_name}[/bold green]\n"
             f" [dim]AI Model:[/dim] [bold cyan]{self.model_name}[/bold cyan]\n"
             f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]\n"
-            f" [dim]Lab Verification:[/dim] [bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]{'ENABLED' if self.scope_manager.config.lab_mode_enabled else 'disabled'}[/bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]"
         )
 
         # Right Column
