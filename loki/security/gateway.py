@@ -129,12 +129,13 @@ class ExecutionGateway:
         all_strings = self._collect_all_strings(args)
         for s in all_strings:
             # Extract DNS hostnames wherever they occur (including non-HTTP service URIs).
-            for candidate in re.findall(
-                r"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}(?![A-Za-z0-9_-])",
-                s,
-            ):
-                if candidate.rsplit(".", 1)[-1].lower() not in file_extensions:
-                    targets.append(candidate.rstrip(".").lower())
+            if tool_name not in ("python_exec", "py_eval"):
+                for candidate in re.findall(
+                    r"(?<![A-Za-z0-9_-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}(?![A-Za-z0-9_-])",
+                    s,
+                ):
+                    if candidate.rsplit(".", 1)[-1].lower() not in file_extensions:
+                        targets.append(candidate.rstrip(".").lower())
 
             # 1. Extract http/https URLs
             urls = re.findall(r"https?://[^\s\"'<>]+", s)
