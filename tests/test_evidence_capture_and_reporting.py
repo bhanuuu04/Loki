@@ -2,7 +2,13 @@ import hashlib
 
 from loki.assessment.db import DatabaseManager
 from loki.assessment.evidence import sanitize_evidence_output
-from loki.assessment.models import FindingLifecycle, SeverityLevel
+from loki.assessment.models import (
+    ConfidenceLevel,
+    FindingLifecycle,
+    FindingSource,
+    SecurityFinding,
+    SeverityLevel,
+)
 from loki.assessment.store import AssessmentStore
 from loki.security.context import AssessmentSecurityContext
 from loki.security.scope_manager import ScopeConfig, ScopeManager
@@ -202,3 +208,95 @@ def test_agent_persists_authorized_tool_output_as_redacted_evidence(tmp_path):
     assert record["metadata"]["authorized"] is True
     assert "do-not-store-this-token" not in record["raw_output"]
     assert "Strict-Transport-Security header is absent" in record["raw_output"]
+
+
+def test_evidence_provenance_and_capabilities_survive_database_reload(tmp_path):
+    ctx = _active_assessment(tmp_path)
+    evidence = "Authorized test output: route exposes a test-only access marker."
+    evidence_id = ctx.assessment_store.index_evidence(
+        session_id=ctx.active_assessment_id,
+        tool_name="test_route_probe",
+        raw_output=evidence,
+        metadata={"authorized": True},
+    )
+    finding = SecurityFinding(
+        finding_id="F-PERSIST",
+        title="Test-only route behavior",
+        description="The authorized probe returned the recorded marker.",
+        affected_asset="app.example.test",
+        assessment_id=ctx.active_assessment_id,
+        source=FindingSource.TOOL_CONFIRMED,
+        confidence=ConfidenceLevel.HIGH,
+        lifecycle=FindingLifecycle.VALIDATING,
+        evidence_record_id=evidence_id,
+        evidence_provenance="tool:test_route_probe",
+        evidence=evidence,
+        evidence_hash=hashlib.sha256(evidence.encode()).hexdigest(),
+        requires=["authenticated_low_privilege"],
+        enables=["sensitive_read"],
+    )
+    ctx.assessment_store.add_finding(ctx.active_assessment_id, finding)
+
+    reloaded_db = DatabaseManager(db_path=str(tmp_path / "evidence-test.sqlite"))
+    reloaded_store = AssessmentStore(
+        storage_dir=str(tmp_path / "assessments"),
+        db_manager=reloaded_db,
+    )
+    loaded = reloaded_store.load_assessment(ctx.active_assessment_id)
+    assert loaded is not None
+    persisted = loaded.findings[0]
+    assert persisted.source == FindingSource.TOOL_CONFIRMED
+    assert persisted.assessment_id == ctx.active_assessment_id
+    assert persisted.evidence_record_id == evidence_id
+    assert persisted.evidence_provenance == "tool:test_route_probe"
+    assert persisted.requires == ["authenticated_low_privilege"]
+    assert persisted.enables == ["sensitive_read"]
+
+
+def test_database_migrates_legacy_finding_table(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE findings (
+                finding_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                affected_asset TEXT NOT NULL,
+                affected_endpoint TEXT,
+                category TEXT NOT NULL,
+                cwe_id TEXT,
+                cve_id TEXT,
+                cvss_score REAL NOT NULL DEFAULT 0.0,
+                severity TEXT NOT NULL,
+                confidence TEXT NOT NULL,
+                lifecycle TEXT NOT NULL,
+                evidence TEXT,
+                evidence_hash TEXT,
+                reproduction_json TEXT,
+                false_positive_score REAL NOT NULL DEFAULT 0.0,
+                false_positive_reasons TEXT,
+                remediation TEXT,
+                references_json TEXT,
+                discovered_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+
+    migrated = DatabaseManager(db_path=str(db_path))
+    with migrated._get_connection() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
+    assert {
+        "source",
+        "assessment_id",
+        "task_id",
+        "tool_execution_id",
+        "evidence_record_id",
+        "evidence_provenance",
+        "requires_json",
+        "enables_json",
+    }.issubset(columns)
