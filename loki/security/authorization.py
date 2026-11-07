@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import ipaddress
 import threading
 import time
 import uuid
@@ -188,7 +189,28 @@ class OperatorAuthorizationManager:
 
         if target:
             host = cls._host(target)
-            if not any(host == approved or host.endswith(f".{approved}") for approved in ticket.approved_targets):
+            try:
+                target_ip = ipaddress.ip_address(host)
+            except ValueError:
+                target_ip = None
+
+            covered = False
+            for approved in ticket.approved_targets:
+                try:
+                    approved_ip = ipaddress.ip_address(approved)
+                except ValueError:
+                    approved_ip = None
+
+                if target_ip is not None or approved_ip is not None:
+                    # IP authorization must be exact; never use domain suffix matching for IPs.
+                    if target_ip is not None and approved_ip is not None and target_ip == approved_ip:
+                        covered = True
+                        break
+                elif host == approved or host.endswith(f".{approved}"):
+                    covered = True
+                    break
+
+            if not covered:
                 return False, "Target is not covered by this operator ticket.", ticket
         return True, "Ticket verified for the active assessment.", ticket
 
