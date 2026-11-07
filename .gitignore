@@ -10,3 +10,7 @@ assessments/*.json
 reports/*
 logs/*.jsonl
 data/
+
+# Loki per-user secret files if a custom in-repository path is configured
+.loki/
+security.env
