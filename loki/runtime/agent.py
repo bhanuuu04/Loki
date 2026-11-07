@@ -2,7 +2,7 @@
 Core LokiAgent execution engine and harness loop.
 """
 
-from typing import Any, AsyncIterator, Callable, List, Optional, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 import asyncio
 import time
 import uuid
