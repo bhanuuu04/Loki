@@ -26,7 +26,12 @@ async def run_setup_wizard(reset: bool = False):
         reset_configuration()
         console.print("[yellow]✔ Existing provider configuration has been reset to defaults.[/yellow]\n")
 
-    security_state = ensure_security_secrets()
+    try:
+        security_state = ensure_security_secrets()
+    except (OSError, PermissionError, RuntimeError) as exc:
+        console.print(f"[bold red]Security bootstrap failed:[/bold red] {exc}")
+        return
+
     if security_state["created"]:
         console.print("[green]✓ Loki generated and securely stored its local security credentials.[/green]")
     else:
