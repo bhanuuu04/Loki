@@ -364,6 +364,11 @@ class KaliToolIndex:
         expanded = set(terms)
         for term in terms:
             expanded.update(QUERY_SYNONYMS.get(term, set()))
+            # Make aliases searchable in both directions: "wifi" should find
+            # entries described as "wireless", just as "wireless" finds "wifi".
+            for canonical, aliases in QUERY_SYNONYMS.items():
+                if term in aliases:
+                    expanded.add(canonical)
         return expanded
 
     def search(
