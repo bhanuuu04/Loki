@@ -191,9 +191,12 @@ def test_operator_authorization_rejects_arbitrary_tokens():
     from loki.security.context import AssessmentSecurityContext
     from loki.tools.security_tools import authorize_target
 
-    AssessmentSecurityContext.reset_default()
+    ctx = AssessmentSecurityContext.reset_default()
     from loki.config import settings
-    settings.operator_token = "test-operator-token-with-at-least-32-bytes"
+    operator_token = "test-operator-token-with-at-least-32-bytes"
+    settings.operator_token = operator_token
+    from loki.tools.security_tools import configure_scope
+    configure_scope(targets=["127.0.0.1"], assessment_name="Unauthorized Ticket Test", operator_token=operator_token)
 
     # Pass arbitrary token
     res = authorize_target("evil-unauthorized-host.org", authorization_token="any_random_token_123")
@@ -257,6 +260,7 @@ def test_signed_operator_ticket_authorization(monkeypatch, tmp_path):
         approved_targets=["new-approved-asset.com"],
         valid_seconds=3600.0,
         operator="security_lead",
+        operator_token=operator_token,
     )
 
     res_auth = authorize_target("new-approved-asset.com", authorization_token=valid_ticket)
@@ -324,7 +328,9 @@ def test_signed_ticket_requires_assessment_binding(monkeypatch, tmp_path):
     from loki.security.authorization import OperatorAuthorizationManager
     monkeypatch.setenv("LOKI_AUTH_SIGNING_KEY", "test-signing-key-with-at-least-32-bytes")
     monkeypatch.setenv("LOKI_AUTH_REVOCATION_FILE", str(tmp_path / "revoked.json"))
-    token = OperatorAuthorizationManager.issue_ticket("assessment-one", ["example.com"])
+    token = OperatorAuthorizationManager.issue_ticket(
+        "assessment-one", ["example.com"], operator_token="test-operator-token-with-at-least-32-bytes"
+    )
     valid, reason, _ = OperatorAuthorizationManager.verify_ticket(
         token, assessment_id="assessment-two", target="example.com"
     )
@@ -335,8 +341,12 @@ def test_signed_ticket_requires_assessment_binding(monkeypatch, tmp_path):
 def test_signing_fails_without_explicit_secret(monkeypatch):
     from loki.security.authorization import OperatorAuthorizationManager
     monkeypatch.delenv("LOKI_AUTH_SIGNING_KEY", raising=False)
+    from loki.config import settings
+    settings.operator_token = "test-operator-token-with-at-least-32-bytes"
     with pytest.raises(RuntimeError, match="LOKI_AUTH_SIGNING_KEY"):
-        OperatorAuthorizationManager.issue_ticket("assessment-one", ["example.com"])
+        OperatorAuthorizationManager.issue_ticket(
+            "assessment-one", ["example.com"], operator_token=settings.operator_token
+        )
 
 
 def test_ticket_revocation_persists_to_disk(monkeypatch, tmp_path):
@@ -365,3 +375,13 @@ def test_human_approval_metadata_is_enforced(clean_gateway):
     result = asyncio.run(clean_gateway.execute(call, dangerous_tool))
     assert result.is_error
     assert result.metadata.get("requires_human_approval") is True
+
+
+def test_ticket_issue_rejects_missing_operator_credential(monkeypatch):
+    from loki.security.authorization import OperatorAuthorizationManager
+    from loki.config import settings
+    settings.operator_token = "operator-token-with-at-least-32-bytes"
+    with pytest.raises(PermissionError, match="LOKI_OPERATOR_TOKEN"):
+        OperatorAuthorizationManager.issue_ticket(
+            "assessment-one", ["example.com"], operator_token="not-the-operator-token"
+        )
