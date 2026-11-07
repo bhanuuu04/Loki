@@ -95,7 +95,7 @@ class LokiAgent:
         self.memory_store = memory_store or MemoryStore()
         self.tool_learning = tool_learning or tool_performance_memory
         continuation_budget = settings.max_adaptive_continuations if max_adaptive_continuations is None else max_adaptive_continuations
-        self.max_adaptive_continuations = max(0, min(int(continuation_budget), 12))
+        self.max_adaptive_continuations = max(0, min(int(continuation_budget), 20))
 
         self.security_context = AssessmentSecurityContext.get_default()
         self._follow_default_security_context = gateway is None
@@ -214,22 +214,36 @@ class LokiAgent:
             return mentions_cdn and not verified_origin
         return False
 
-    @staticmethod
     def _continuation_message(
+        self,
         task_type: str,
         outcomes: List[tuple[str, str]],
         continuation_number: int,
         max_continuations: int,
     ) -> str:
-        ledger = ", ".join(f"{name}={outcome}" for name, outcome in outcomes[-20:]) or "No tools called yet"
+        # Keep a compact, de-duplicated method ledger so the model can diversify
+        # instead of cycling through the same unsuccessful command aliases.
+        latest_by_tool: Dict[str, str] = {}
+        for name, outcome in outcomes:
+            latest_by_tool[name] = outcome
+        tried = ", ".join(
+            f"{name}={outcome}" for name, outcome in list(latest_by_tool.items())[-24:]
+        ) or "No tools called yet"
+        tried_names = set(latest_by_tool)
+        remaining = max(0, max_continuations - continuation_number)
         return (
-            f"INVESTIGATION CONTINUATION {continuation_number}/{max_continuations}. "
+            f"INVESTIGATION CONTINUATION {continuation_number}/{max_continuations}; "
+            f"{remaining} continuation cycles remain. "
             f"The primary objective ({task_type}) is still unresolved. "
-            f"Methods tried so far: {ledger}. "
-            "Continue with a materially different, authorized method if one is available. "
-            "Do not repeat a no-result/error method without a new hypothesis; consult the updated "
-            "tool-effectiveness memory and prioritize methods with prior useful results. "
-            "Separate the primary objective from additional useful observations. "
+            f"Distinct methods already tried: {len(tried_names)}. Latest outcomes: {tried}. "
+            "Prefer a materially different method or a new evidence source. "
+            "Do not repeat any method with a no-result/error outcome unless you state a concrete new hypothesis. "
+            "Use the refreshed task-specific tool-effectiveness memory to prioritize methods that previously "
+            "returned useful evidence; do not let one success override current evidence or authorization. "
+            "If the remaining budget allows, continue exploring distinct authorized methods before final synthesis. "
+            "Keep the primary objective separate from useful side observations. "
+            "For origin-IP work, DNS/CDN edge addresses are not origin proof: use owner-controlled inventory "
+            "or authoritative records, and never bypass a CDN or probe hidden-origin candidates. "
             "If every remaining method is blocked or unsafe, stop and explain the limitation honestly."
         )
 
