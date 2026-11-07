@@ -70,9 +70,16 @@ class LokiUpdater:
             return path.lower() == OFFICIAL_REPOSITORY_PATH
 
         parsed = urlparse(value)
-        if parsed.scheme.lower() not in {"https", "http", "ssh", "git"}:
+        scheme = parsed.scheme.lower()
+        if scheme not in {"https", "ssh"}:
             return False
         if (parsed.hostname or "").lower() != OFFICIAL_GITHUB_HOST:
+            return False
+        if parsed.password or parsed.query or parsed.fragment:
+            return False
+        if scheme == "https" and parsed.username:
+            return False
+        if scheme == "ssh" and parsed.username not in (None, "git"):
             return False
         path = parsed.path.strip("/").removesuffix(".git")
         return path.lower() == OFFICIAL_REPOSITORY_PATH
