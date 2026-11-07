@@ -21,7 +21,6 @@ import inspect
 import ipaddress
 import json
 import re
-import shlex
 import time
 import urllib.parse
 
