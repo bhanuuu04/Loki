@@ -78,6 +78,11 @@ def test_tool_effectiveness_memory_prioritizes_a_tool_that_found_results(tmp_pat
         earlier_methods + ["method_16"],
     )[0] == "method_16"
 
+    # With no history, preserve the discovery engine's relevance ordering.
+    assert reloaded.rank_tool_names("new_task", ["most_relevant", "second_relevant"]) == [
+        "most_relevant", "second_relevant"
+    ]
+
 
 class SequencedProvider:
     model = "adaptive-test-model"
@@ -147,6 +152,9 @@ async def test_agent_continues_after_unresolved_answer_and_records_success(tmp_p
     stats = memory.get_task_stats("origin_ip_verification")["owner_asset_inventory"]
     assert stats["success"] == 1
     assert stats["score"] > 0.5
+    third_turn_system = [m.content for m in provider.seen_messages[2] if m.role.value == "system"]
+    assert third_turn_system
+    assert "owner_asset_inventory" in third_turn_system[0]
 
 
 def test_gateway_blocks_are_not_treated_as_a_reason_to_try_bypasses():
