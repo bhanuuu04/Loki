@@ -134,7 +134,24 @@ async def test_full_controlled_lab_assessment_lifecycle(tmp_path):
     assert "lab.internal.local" in recovered_session.assets
     assert v2.false_positive_risk_score >= 0.5
 
-    # 7. Verify audit logging captured all operations
+    # 7. Verify audit logging captured all operations and hash chain integrity
     audit_entries = audit_logger.get_entries()
     assert len(audit_entries) >= 5
     assert all(e.is_authorized is True for e in audit_entries)
+    is_valid_chain, count, err = audit_logger.verify_audit_integrity()
+    assert is_valid_chain is True
+    assert count >= 5
+
+    # 8. Test out-of-scope target probe: Gateway MUST block
+    from loki.types import ToolCall
+    call_blocked = ToolCall(id="call_blocked_01", name="dns_lookup", arguments={"host": "admin.lab.internal.local"})
+    res_blocked = await gateway.execute(call_blocked, lab_dns)
+    assert res_blocked.is_error
+    assert "Scope Violation" in res_blocked.output
+
+    # 9. Test dynamic scope revocation
+    scope_mgr.revoke_target("lab.internal.local", reason="Operator emergency revocation")
+    call_revoked = ToolCall(id="call_revoked_01", name="dns_lookup", arguments={"host": "lab.internal.local"})
+    res_revoked = await gateway.execute(call_revoked, lab_dns)
+    assert res_revoked.is_error
+    assert "Scope Violation" in res_revoked.output

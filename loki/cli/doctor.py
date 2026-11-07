@@ -91,6 +91,16 @@ class LokiDoctor:
         else:
             items.append(DiagnosticItem("Storage", "Directory Permissions", "FAIL", "Permission error creating/writing to data directories"))
 
+        # Database Health
+        try:
+            from loki.assessment.db import DatabaseManager
+            db = DatabaseManager()
+            with db._get_connection() as conn:
+                conn.execute("SELECT 1;").fetchone()
+            items.append(DiagnosticItem("Storage", "SQLite Database", "PASS", f"Database healthy ({db.db_path.name})"))
+        except Exception as e:
+            items.append(DiagnosticItem("Storage", "SQLite Database", "FAIL", f"Database error: {str(e)}"))
+
         # 5. Security Tool Catalog
         catalog = SecurityToolCatalog()
         tools = catalog.list_tools()

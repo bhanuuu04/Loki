@@ -194,3 +194,95 @@ def test_operator_authorization_rejects_arbitrary_tokens():
     res = authorize_target("evil-unauthorized-host.org", authorization_token="any_random_token_123")
     assert "Authorization Denied" in res
     assert "Autonomous self-authorization by the model is disabled" in res
+
+
+@pytest.mark.asyncio
+async def test_nested_and_percent_encoded_target_extraction(clean_gateway):
+    """Verify targets inside nested structures and percent-encoded URLs are extracted and validated."""
+    from loki.tools.base import ToolCapability
+
+    @tool(
+        name="api_tester",
+        description="Complex API caller with nested configs",
+        capabilities=[ToolCapability.NETWORK, ToolCapability.TARGET_INTERACTION],
+    )
+    def api_tester(options: dict) -> str:
+        return "Executed"
+
+    # Nested target out of scope
+    call_nested = ToolCall(
+        id="call_nest_01",
+        name="api_tester",
+        arguments={"options": {"remote_endpoint": "https://unauthorized-internal.net/v1"}},
+    )
+    res_nested = await clean_gateway.execute(call_nested, api_tester)
+    assert res_nested.is_error
+    assert "Scope Violation" in res_nested.output
+
+    # Percent-encoded target out of scope
+    call_encoded = ToolCall(
+        id="call_enc_01",
+        name="api_tester",
+        arguments={"options": {"url": "http%3A%2F%2Fevil-target.com%2Fexploit"}},
+    )
+    res_encoded = await clean_gateway.execute(call_encoded, api_tester)
+    assert res_encoded.is_error
+    assert "Scope Violation" in res_encoded.output
+
+
+def test_signed_operator_ticket_authorization():
+    """Verify cryptographically signed operator ticket authorizes targets, while tampered tickets fail."""
+    from loki.security.authorization import OperatorAuthorizationManager
+    from loki.security.context import AssessmentSecurityContext
+    from loki.tools.security_tools import authorize_target
+
+    AssessmentSecurityContext.reset_default()
+
+    # 1. Generate valid signed operator ticket
+    valid_ticket = OperatorAuthorizationManager.issue_ticket(
+        assessment_id="audit_2026",
+        approved_targets=["new-approved-asset.com"],
+        valid_seconds=3600.0,
+        operator="security_lead",
+    )
+
+    res_auth = authorize_target("new-approved-asset.com", authorization_token=valid_ticket)
+    assert "has been authorized via signed operator ticket" in res_auth
+
+    # 2. Tampered ticket (modify payload)
+    tampered_ticket = valid_ticket[:-4] + "ffff"
+    res_tampered = authorize_target("unauthorized-hack.com", authorization_token=tampered_ticket)
+    assert "Authorization Denied" in res_tampered
+
+    # 3. Revoked ticket
+    parts = valid_ticket.split(".")
+    import base64, json
+    payload_dict = json.loads(base64.urlsafe_b64decode(parts[0].encode()).decode())
+    ticket_id = payload_dict["ticket_id"]
+
+    OperatorAuthorizationManager.revoke_ticket(ticket_id, reason="Operator emergency revocation")
+    is_valid, reason, _ = OperatorAuthorizationManager.verify_ticket(valid_ticket)
+    assert not is_valid
+    assert "revoked" in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_dynamic_target_revocation_enforced_by_gateway(clean_gateway):
+    """Verify revoking a target immediately blocks subsequent tool calls through the gateway."""
+    @tool(name="ping_target", description="Ping target", capabilities=["network", "target_interaction"])
+    def ping_target(target: str) -> str:
+        return f"Pong from {target}"
+
+    # Initial call is authorized
+    call_in = ToolCall(id="call_ping_01", name="ping_target", arguments={"target": "authorized.example.com"})
+    res_in = await clean_gateway.execute(call_in, ping_target)
+    assert not res_in.is_error
+
+    # Operator revokes target
+    clean_gateway.scope_manager.revoke_target("authorized.example.com", reason="Audit terminated early")
+
+    # Immediate subsequent call must be blocked
+    call_revoked = ToolCall(id="call_ping_02", name="ping_target", arguments={"target": "authorized.example.com"})
+    res_revoked = await clean_gateway.execute(call_revoked, ping_target)
+    assert res_revoked.is_error
+    assert "Scope Violation" in res_revoked.output

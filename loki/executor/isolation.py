@@ -43,7 +43,21 @@ class ExecutionIsolationResult(BaseModel):
 class IsolatedExecutionEngine:
     """Manages real sandboxed execution for shell and Python tasks."""
 
+    MAX_OUTPUT_BYTES: int = 1024 * 1024  # 1 MB maximum output to prevent memory exhaustion
     _docker_checked: Optional[bool] = None
+
+    @classmethod
+    def _truncate_output(cls, data: Union[str, bytes]) -> str:
+        """Safely decode and bound output buffer to MAX_OUTPUT_BYTES."""
+        if isinstance(data, bytes):
+            if len(data) > cls.MAX_OUTPUT_BYTES:
+                return data[:cls.MAX_OUTPUT_BYTES].decode("utf-8", errors="replace") + "\n[WARNING: Output truncated - exceeded 1MB limit]"
+            return data.decode("utf-8", errors="replace")
+        elif isinstance(data, str):
+            if len(data.encode("utf-8", errors="replace")) > cls.MAX_OUTPUT_BYTES:
+                return data[:cls.MAX_OUTPUT_BYTES] + "\n[WARNING: Output truncated - exceeded 1MB limit]"
+            return data
+        return str(data)
 
     @classmethod
     def is_docker_available(cls) -> bool:
@@ -210,8 +224,8 @@ class IsolatedExecutionEngine:
 
                 return ExecutionIsolationResult(
                     command=command,
-                    stdout=stdout_b.decode("utf-8", errors="replace"),
-                    stderr=stderr_b.decode("utf-8", errors="replace"),
+                    stdout=cls._truncate_output(stdout_b),
+                    stderr=cls._truncate_output(stderr_b),
                     exit_code=exit_code,
                     timed_out=timed_out,
                     duration_ms=round(duration_ms, 2),
@@ -259,8 +273,8 @@ class IsolatedExecutionEngine:
 
             return ExecutionIsolationResult(
                 command=command,
-                stdout=stdout_b.decode("utf-8", errors="replace"),
-                stderr=stderr_b.decode("utf-8", errors="replace"),
+                stdout=cls._truncate_output(stdout_b),
+                stderr=cls._truncate_output(stderr_b),
                 exit_code=exit_code,
                 timed_out=timed_out,
                 duration_ms=round(duration_ms, 2),
@@ -351,8 +365,8 @@ class IsolatedExecutionEngine:
 
                 return ExecutionIsolationResult(
                     command=["python", "-I", str(script_file)],
-                    stdout=stdout_b.decode("utf-8", errors="replace"),
-                    stderr=stderr_b.decode("utf-8", errors="replace"),
+                    stdout=cls._truncate_output(stdout_b),
+                    stderr=cls._truncate_output(stderr_b),
                     exit_code=exit_code,
                     timed_out=timed_out,
                     duration_ms=round(duration_ms, 2),
@@ -402,8 +416,8 @@ class IsolatedExecutionEngine:
 
             return ExecutionIsolationResult(
                 command=py_cmd,
-                stdout=stdout_b.decode("utf-8", errors="replace"),
-                stderr=stderr_b.decode("utf-8", errors="replace"),
+                stdout=cls._truncate_output(stdout_b),
+                stderr=cls._truncate_output(stderr_b),
                 exit_code=exit_code,
                 timed_out=timed_out,
                 duration_ms=round(duration_ms, 2),

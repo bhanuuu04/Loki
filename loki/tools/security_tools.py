@@ -72,7 +72,22 @@ def authorize_target(target: str, authorization_token: Optional[str] = None) -> 
     if in_scope:
         return f"Target '{cleaned}' is verified and within authorized assessment scope ({reason})."
 
-    # Require explicit, verified operator token (not any arbitrary non-empty string)
+    # 1. Check cryptographically signed operator ticket
+    if authorization_token and "." in authorization_token:
+        from loki.security.authorization import OperatorAuthorizationManager
+        is_valid, auth_reason, ticket = OperatorAuthorizationManager.verify_ticket(
+            token_str=authorization_token,
+            target=cleaned,
+        )
+        if is_valid and ticket:
+            ctx.scope_manager.update_targets(
+                add_targets=[cleaned],
+                author=f"ticket:{ticket.issued_by}",
+                reason=f"Signed operator ticket {ticket.ticket_id} verified for {cleaned}",
+            )
+            return f"Target '{cleaned}' has been authorized via signed operator ticket under scope version {ctx.scope_manager.config.version}."
+
+    # 2. Check static operator master token if configured
     expected_token = settings.operator_token
     if expected_token and authorization_token and authorization_token.strip() == expected_token:
         ctx.scope_manager.update_targets(

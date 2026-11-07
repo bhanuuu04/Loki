@@ -8,7 +8,7 @@ from enum import Enum
 import inspect
 import functools
 import time
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loki.types import ToolResult
 
 
@@ -20,6 +20,20 @@ class ToolCapability(str, Enum):
     PYTHON = "python"
     FILESYSTEM = "filesystem"
     UTILITY = "utility"
+
+
+class ToolMetadata(BaseModel):
+    """Structured security and capability metadata for tool governance."""
+    tool_name: str
+    category: str = "general"
+    requires_network: bool = False
+    requires_filesystem: bool = False
+    requires_process_execution: bool = False
+    target_parameter_schema: Optional[Dict[str, Any]] = None
+    required_permission_level: str = "standard"  # standard, elevated, admin
+    risk_classification: str = "low"  # low, medium, high, critical
+    expected_side_effects: List[str] = Field(default_factory=list)
+    requires_human_approval: bool = False
 
 
 def _py_type_to_json_schema(py_type: Any) -> Dict[str, Any]:
@@ -49,6 +63,7 @@ class Tool:
         func: Callable[..., Any],
         parameters_schema: Optional[Dict[str, Any]] = None,
         capabilities: Optional[List[Union[ToolCapability, str]]] = None,
+        metadata: Optional[ToolMetadata] = None,
     ):
         self.name = name
         self.description = description
@@ -59,6 +74,29 @@ class Tool:
             c.value if isinstance(c, ToolCapability) else str(c)
             for c in (capabilities or [])
         }
+        self.metadata = metadata or self._derive_metadata()
+
+    def _derive_metadata(self) -> ToolMetadata:
+        """Derive default structured security metadata from capabilities."""
+        is_net = (
+            ToolCapability.NETWORK.value in self.capabilities
+            or ToolCapability.TARGET_INTERACTION.value in self.capabilities
+        )
+        is_fs = ToolCapability.FILESYSTEM.value in self.capabilities
+        is_proc = any(
+            c in self.capabilities
+            for c in (ToolCapability.SYSTEM.value, ToolCapability.SHELL.value, ToolCapability.PYTHON.value)
+        )
+        risk = "medium" if is_proc else ("medium" if is_net else "low")
+        return ToolMetadata(
+            tool_name=self.name,
+            category="recon" if is_net else ("system" if is_proc else "utility"),
+            requires_network=is_net,
+            requires_filesystem=is_fs,
+            requires_process_execution=is_proc,
+            risk_classification=risk,
+            requires_human_approval=(risk == "critical"),
+        )
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -145,6 +183,7 @@ def tool(
     name: Optional[str] = None,
     description: Optional[str] = None,
     capabilities: Optional[List[Union[ToolCapability, str]]] = None,
+    metadata: Optional[ToolMetadata] = None,
 ):
     """
     Decorator to convert a standard Python function into a Loki Tool.
@@ -157,6 +196,7 @@ def tool(
             description=tool_desc,
             func=fn,
             capabilities=capabilities,
+            metadata=metadata,
         )
 
     return decorator

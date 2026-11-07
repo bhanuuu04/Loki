@@ -22,6 +22,7 @@ import ipaddress
 import json
 import re
 import time
+import urllib.parse
 
 from loki.security.scope_manager import ScopeManager
 from loki.security.policy_engine import PolicyEngine, CommandRisk, ExecutionMode
@@ -76,8 +77,29 @@ class ExecutionGateway:
     def set_default(cls, gateway: "ExecutionGateway") -> None:
         cls._default_instance = gateway
 
+    def _collect_all_strings(self, data: Any) -> List[str]:
+        """Recursively collect and decode all string values from nested arguments."""
+        results: List[str] = []
+        if isinstance(data, str):
+            results.append(data)
+            try:
+                decoded = urllib.parse.unquote(data)
+                if decoded != data:
+                    results.append(decoded)
+            except Exception:
+                pass
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(k, str):
+                    results.append(k)
+                results.extend(self._collect_all_strings(v))
+        elif isinstance(data, (list, tuple, set)):
+            for item in data:
+                results.extend(self._collect_all_strings(item))
+        return results
+
     def extract_targets(self, tool_name: str, args: Dict[str, Any]) -> List[str]:
-        """Extract potential host/domain/IP targets from tool arguments and command strings."""
+        """Extract potential host/domain/IP targets from tool arguments, nested structures, and command strings."""
         targets: List[str] = []
 
         # Common target argument names
@@ -95,43 +117,49 @@ class ExecutionGateway:
                         if isinstance(item, str) and item.strip():
                             targets.append(item.strip())
 
-        # For shell commands or general strings, extract URLs, IPs, and command targets
-        for k, v in args.items():
-            if isinstance(v, str) and k not in target_keys:
-                # 1. Extract http/https URLs
-                urls = re.findall(r"https?://[^\s\"'<>]+", v)
-                for u in urls:
-                    targets.append(u)
+        # Collect all string fragments from nested arguments and decoded strings
+        all_strings = self._collect_all_strings(args)
+        for s in all_strings:
+            # 1. Extract http/https URLs
+            urls = re.findall(r"https?://[^\s\"'<>]+", s)
+            for u in urls:
+                targets.append(u)
 
-                # 2. Extract raw IPv4 addresses
-                raw_ips = re.findall(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:/[0-9]{1,2})?\b", v)
-                for ip_str in raw_ips:
-                    try:
-                        ipaddress.ip_network(ip_str, strict=False)
-                        targets.append(ip_str)
-                    except ValueError:
-                        pass
+            # 2. Extract raw IPv4 addresses and CIDRs
+            raw_ips = re.findall(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:/[0-9]{1,2})?\b", s)
+            for ip_str in raw_ips:
+                try:
+                    ipaddress.ip_network(ip_str, strict=False)
+                    targets.append(ip_str)
+                except ValueError:
+                    pass
 
-                # 3. Extract targets following network commands (e.g. nmap, ping, curl, dig, etc.)
-                net_cmd_match = re.findall(
-                    r"\b(?:nmap|curl|wget|ping|nc|netcat|ssh|telnet|dig|nslookup|traceroute|nikto|sqlmap|ffuf)\s+(?:-[^\s]+\s+)*([a-zA-Z0-9_\-\.]+)",
-                    v,
-                    re.IGNORECASE,
-                )
-                for tgt in net_cmd_match:
-                    if not tgt.startswith("-") and ("." in tgt or tgt in ("localhost", "metadata")):
-                        targets.append(tgt)
+            # 3. Extract targets following network commands (e.g. nmap, ping, curl, dig, etc.)
+            net_cmd_match = re.findall(
+                r"\b(?:nmap|curl|wget|ping|nc|netcat|ssh|telnet|dig|nslookup|traceroute|nikto|sqlmap|ffuf)\s+(?:-[^\s]+\s+)*([a-zA-Z0-9_\-\.]+)",
+                s,
+                re.IGNORECASE,
+            )
+            for tgt in net_cmd_match:
+                if not tgt.startswith("-") and ("." in tgt or tgt in ("localhost", "metadata", "instance-data")):
+                    targets.append(tgt)
 
-                # 4. Extract targets passed to --target, -u, --url, -t, etc.
-                flag_targets = re.findall(
-                    r"(?:--target|-u|--url|-t|--host|-h)\s+([^\s\"'>]+)",
-                    v,
-                    re.IGNORECASE,
-                )
-                for ft in flag_targets:
-                    cleaned_ft = ft.strip("\"'")
-                    if cleaned_ft and not cleaned_ft.startswith("-"):
-                        targets.append(cleaned_ft)
+            # 4. Extract targets passed to --target, -u, --url, -t, etc.
+            flag_targets = re.findall(
+                r"(?:--target|-u|--url|-t|--host|-h)\s+([^\s\"'>]+)",
+                s,
+                re.IGNORECASE,
+            )
+            for ft in flag_targets:
+                cleaned_ft = ft.strip("\"'")
+                if cleaned_ft and not cleaned_ft.startswith("-"):
+                    targets.append(cleaned_ft)
+
+            # 5. Extract environment variable assignments in command strings
+            env_var_targets = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*=([a-zA-Z0-9_\-\./:]+)", s)
+            for et in env_var_targets:
+                if "." in et or "://" in et:
+                    targets.append(et)
 
         return list(dict.fromkeys(targets))  # Deduplicate preserving order
 
@@ -152,7 +180,7 @@ class ExecutionGateway:
             if req_prop not in args or args[req_prop] is None:
                 return False, f"Missing required parameter '{req_prop}' for tool '{tool_instance.name}'."
 
-        # Basic type checking
+        # Type checking and target boundary sanitization
         for prop_name, prop_val in args.items():
             if prop_name in properties:
                 expected_type = properties[prop_name].get("type")
@@ -166,6 +194,16 @@ class ExecutionGateway:
                     return False, f"Parameter '{prop_name}' expected string, got {type(prop_val).__name__}."
                 elif expected_type == "array" and not isinstance(prop_val, (list, tuple)):
                     return False, f"Parameter '{prop_name}' expected array/list, got {type(prop_val).__name__}."
+
+            # Target field sanitization
+            if prop_name in ("target", "host", "hostname", "url", "domain", "endpoint") and isinstance(prop_val, str):
+                if "\x00" in prop_val:
+                    return False, f"Null byte detected in parameter '{prop_name}'."
+                if len(prop_val) > 2048:
+                    return False, f"Parameter '{prop_name}' exceeds maximum allowed length of 2048 characters."
+            elif prop_name == "port" and isinstance(prop_val, int):
+                if not (1 <= prop_val <= 65535):
+                    return False, f"Port parameter '{prop_val}' is outside valid range (1-65535)."
 
         return True, "Arguments valid."
 

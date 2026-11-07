@@ -105,3 +105,61 @@ def test_context_compaction_preserves_system_prompt_and_recent_history():
 
     # Most recent message should be preserved
     assert "Assistant thought 5" in messages[-1].content or "Output 5" in messages[-1].content
+
+
+def test_audit_logger_redaction_and_tamper_evidence(tmp_path):
+    """Test that AuditLogger redacts sensitive tokens and detects log tampering."""
+    from loki.security.audit_logger import AuditLogger, AuditEntry
+
+    log_dir = tmp_path / "audit_test"
+    logger = AuditLogger(log_dir=str(log_dir))
+
+    # Entry with sensitive credentials
+    entry1 = AuditEntry(
+        assessment_name="Audit Redaction Test",
+        target="target.local",
+        tool_name="curl",
+        command_args=[
+            "curl -H 'Authorization: Bearer secret_api_key_123456'",
+            "--data password=super_secret_pass",
+        ],
+        risk_level="low",
+        is_authorized=True,
+        status="executed",
+    )
+    logger.log(entry1)
+
+    # Verify redaction
+    entries = logger.get_entries("Audit Redaction Test")
+    assert len(entries) == 1
+    assert "secret_api_key" not in entries[0].command_args[0]
+    assert "[REDACTED_BEARER_TOKEN]" in entries[0].command_args[0]
+    assert "super_secret_pass" not in entries[0].command_args[1]
+
+    # Entry 2
+    entry2 = AuditEntry(
+        assessment_name="Audit Redaction Test",
+        target="target.local",
+        tool_name="nmap",
+        command_args=["nmap -sV target.local"],
+        risk_level="low",
+        is_authorized=True,
+        status="executed",
+    )
+    logger.log(entry2)
+
+    # Verify cryptographic hash chain
+    is_valid, count, err = logger.verify_audit_integrity()
+    assert is_valid is True
+    assert count == 2
+    assert err is None
+
+    # Tamper with file
+    lines = logger.log_file.read_text(encoding="utf-8").splitlines()
+    lines[0] = lines[0].replace("target.local", "tampered.local")
+    logger.log_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Verify tamper is caught
+    tampered_valid, _, tamper_err = logger.verify_audit_integrity()
+    assert tampered_valid is False
+    assert "tamper" in tamper_err.lower() or "broken" in tamper_err.lower()

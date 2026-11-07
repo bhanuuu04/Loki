@@ -168,6 +168,22 @@ class ScopeManager:
         self._dns_cache.clear()
         self._record_history(f"Targets modified (v{self.config.version})", author=author, reason=reason)
 
+    def revoke_target(self, target: str, author: str = "operator", reason: str = "Explicit target revocation") -> None:
+        """
+        Dynamically and immediately revoke authorization for a target.
+        Removes target from approved targets and places it into excluded_targets,
+        ensuring immediate exclusion precedence across all components.
+        """
+        cleaned = self.normalize_target(target)
+        if not cleaned:
+            return
+        self.update_targets(
+            remove_targets=[cleaned],
+            add_exclusions=[cleaned],
+            author=author,
+            reason=f"{reason} for '{cleaned}'",
+        )
+
     def get_version_history(self) -> List[ScopeVersionRecord]:
         """Return the immutable audit history of scope changes."""
         return list(self._version_history)

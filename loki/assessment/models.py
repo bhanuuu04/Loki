@@ -84,6 +84,10 @@ class SecurityFinding(BaseModel):
     confidence: ConfidenceLevel = ConfidenceLevel.POTENTIAL
     lifecycle: FindingLifecycle = FindingLifecycle.DISCOVERED
     source: FindingSource = FindingSource.MODEL_HYPOTHESIS
+    assessment_id: Optional[str] = None
+    task_id: Optional[str] = None
+    tool_execution_id: Optional[str] = None
+    evidence_record_id: Optional[str] = None
     evidence_provenance: Optional[str] = None
     evidence: str = ""
     evidence_hash: Optional[str] = None

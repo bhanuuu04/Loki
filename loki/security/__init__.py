@@ -3,6 +3,7 @@ from loki.security.policy_engine import PolicyEngine, ExecutionMode, CommandRisk
 from loki.security.audit_logger import AuditLogger, AuditEntry
 from loki.security.gateway import ExecutionGateway
 from loki.security.context import AssessmentSecurityContext
+from loki.security.authorization import OperatorAuthorizationManager, OperatorAuthorizationTicket
 
 __all__ = [
     "ScopeManager",
@@ -16,4 +17,6 @@ __all__ = [
     "AuditEntry",
     "ExecutionGateway",
     "AssessmentSecurityContext",
+    "OperatorAuthorizationManager",
+    "OperatorAuthorizationTicket",
 ]

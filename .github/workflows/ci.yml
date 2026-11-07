@@ -32,10 +32,14 @@ jobs:
           pip install -e .
           pip install pytest pytest-asyncio
 
+      - name: Run Import Smoke Test
+        run: |
+          python -c "import loki; from loki.security.gateway import ExecutionGateway; from loki.runtime.agent import LokiAgent; from loki.assessment.orchestrator import AssessmentOrchestrator; from loki.cli.main import cli_entrypoint; print('All core modules imported successfully!')"
+
       - name: Run Loki Doctor Diagnostics
         run: |
           python -m loki.cli.main doctor
 
-      - name: Run Test Suite
+      - name: Run Complete Test Suite
         run: |
           pytest -v

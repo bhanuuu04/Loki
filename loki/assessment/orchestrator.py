@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Structured Assessment Planning & Orchestration Engine for Loki 2.0.
 Deterministic state machine managing phases, task dependency DAGs,
