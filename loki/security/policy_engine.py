@@ -76,6 +76,13 @@ class PolicyEngine:
     STRESS_EXECUTABLES = {
         "slowhttptest", "siege", "hping3", "goldeneye", "torshammer",
     }
+    NETWORK_EXECUTABLES = {
+        "curl", "wget", "ping", "traceroute", "nc", "netcat", "ssh", "telnet",
+        "dig", "nslookup", "host", "nmap", "masscan", "rustscan",
+        "sqlmap", "ffuf", "wfuzz", "gobuster", "dirsearch", "feroxbuster",
+        "nuclei", "nikto", "wpscan", "dalfox", "xsstrike", "commix", "ghauri",
+        "arjun", "hydra", "medusa", "ncrack", "patator", "crowbar",
+    }
     WRAPPER_EXECUTABLES = {
         "sudo", "env", "timeout", "stdbuf", "proxychains", "proxychains4",
     }
@@ -130,6 +137,12 @@ class PolicyEngine:
     def is_brute_force_command(cls, tool_name: str, args: List[str]) -> bool:
         tokens = cls._command_tokens(tool_name, args)
         return any(token in cls.BRUTE_FORCE_EXECUTABLES for token in tokens)
+
+    @classmethod
+    def command_requires_target(cls, tool_name: str, args: List[str]) -> bool:
+        """Identify shell commands that initiate network connections and need an explicit target."""
+        tokens = cls._command_tokens(tool_name, args)
+        return any(token in cls.NETWORK_EXECUTABLES for token in tokens)
 
     def classify_command(self, tool_name: str, args: List[str]) -> CommandRisk:
         """Classify the actual executable inside generic shell invocations too."""
