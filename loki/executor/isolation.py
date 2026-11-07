@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import uuid
+import re
 from pathlib import Path
 from pydantic import BaseModel, Field
 
@@ -239,10 +240,22 @@ class IsolatedExecutionEngine:
         timeout_seconds: float = 30.0,
         workspace_dir: Optional[str] = None,
         allow_network: bool = False,
+        image: Optional[str] = None,
     ) -> ExecutionIsolationResult:
         """Execute shell code only inside Docker; refuse unsafe host fallback."""
         start_time = time.perf_counter()
         timeout = min(max(float(timeout_seconds), 1.0), 60.0)
+        image = image or os.getenv("LOKI_SHELL_DOCKER_IMAGE", "alpine:latest")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:@-]{0,199}", image):
+            return ExecutionIsolationResult(
+                command=command,
+                stderr="Execution refused: invalid Docker image reference in LOKI_SHELL_DOCKER_IMAGE.",
+                exit_code=-1,
+                timed_out=False,
+                duration_ms=round((time.perf_counter() - start_time) * 1000, 2),
+                backend=IsolationBackend.UNAVAILABLE,
+                details="Docker image references must be a simple registry/name:tag value.",
+            )
         temp_dir = tempfile.mkdtemp(prefix="loki_shell_ws_") if not workspace_dir else workspace_dir
         ws_path = str(Path(temp_dir).resolve())
 
@@ -274,7 +287,7 @@ class IsolatedExecutionEngine:
                 "--security-opt=no-new-privileges",
                 "-v", f"{ws_path}:/workspace:rw",
                 "-w", "/workspace",
-                "alpine:latest",
+                image,
                 "sh", "-c", command,
             ]
             proc = await asyncio.create_subprocess_exec(
