@@ -154,3 +154,57 @@ def test_failed_partial_sync_does_not_overwrite_existing_cache(tmp_path, monkeyp
 
     assert cache_path.read_text(encoding="utf-8") == before
     assert len(index.records) == 1
+
+
+def test_agent_registers_kali_discovery_functions():
+    from loki.runtime.agent import LokiAgent
+
+    agent = LokiAgent(provider="mock")
+
+    assert agent.registry.get("discover_kali_tools") is not None
+    assert agent.registry.get("get_kali_tool_details") is not None
+    assert agent.registry.get("check_kali_tool_availability") is not None
+
+
+@pytest.mark.asyncio
+async def test_sandbox_availability_check_is_network_disabled_and_does_not_run_tool(monkeypatch):
+    from loki.executor.isolation import ExecutionIsolationResult, IsolationBackend, IsolatedExecutionEngine
+    from loki.tools import security_tools
+
+    monkeypatch.setattr(
+        security_tools.kali_tool_index,
+        "get_tool",
+        lambda name: {
+            "name": "nmap",
+            "binaries": ["nmap", "ncat"],
+        },
+    )
+    monkeypatch.setattr(security_tools.settings, "shell_docker_image", "loki-kali-tools:latest")
+
+    captured = {}
+
+    async def fake_execute_shell(command, timeout_seconds, image, allow_network):
+        captured.update(
+            command=command,
+            timeout_seconds=timeout_seconds,
+            image=image,
+            allow_network=allow_network,
+        )
+        return ExecutionIsolationResult(
+            command=command,
+            stdout="/usr/bin/nmap\\nnmap FOUND",
+            stderr="",
+            exit_code=0,
+            backend=IsolationBackend.DOCKER,
+        )
+
+    monkeypatch.setattr(IsolatedExecutionEngine, "execute_shell", fake_execute_shell)
+
+    output = await security_tools.check_kali_tool_availability.func("nmap")
+
+    assert "AVAILABLE IN ISOLATED IMAGE" in output
+    assert "command -v" in captured["command"]
+    assert "nmap" in captured["command"]
+    assert captured["image"] == "loki-kali-tools:latest"
+    assert captured["allow_network"] is False
+    assert captured["timeout_seconds"] == 5.0
