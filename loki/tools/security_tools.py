@@ -23,6 +23,7 @@ from loki.security.context import AssessmentSecurityContext
 from loki.knowledge.cwe_database import lookup_cwe
 from loki.knowledge.owasp_knowledge import lookup_owasp
 from loki.knowledge.tool_registry.catalog import SecurityToolCatalog
+from loki.knowledge.tool_registry.kali_catalog import KaliToolIndex
 from loki.executor.process_manager import SecureProcessExecutor
 from loki.executor.output_parser import OutputParser
 from loki.assessment.store import AssessmentStore
@@ -40,6 +41,7 @@ from loki.security.lab_verification import (
     validate_canary_marker,
 )
 from loki.config import settings
+from loki.executor.isolation import IsolatedExecutionEngine
 
 
 # Dynamic proxies ensuring calls always reflect the shared AssessmentSecurityContext
@@ -62,6 +64,7 @@ scope_mgr = _ScopeManagerProxy()
 policy_engine = _PolicyEngineProxy()
 assessment_store = _AssessmentStoreProxy()
 tool_catalog = SecurityToolCatalog()
+kali_tool_index = KaliToolIndex()
 process_executor = SecureProcessExecutor()
 
 
@@ -224,18 +227,180 @@ def check_scope(target: str) -> str:
     capabilities=[ToolCapability.UTILITY],
 )
 def search_tools(query: str) -> str:
-    """Find relevant security tools from the registry."""
-    matches = tool_catalog.search_by_objective(query)
-    if not matches:
-        return f"No documented tools matched query: '{query}'."
-
+    """Find relevant tools in Loki's curated catalogue and the synced Kali index."""
+    curated = tool_catalog.search_by_objective(query)
     results = []
-    for t in matches[:5]:
-        status = "[INSTALLED]" if t.is_installed else "[NOT INSTALLED ON PATH]"
-        cmd_purposes = "; ".join(c.purpose for c in t.commands)
-        results.append(f"• {t.name} {status} ({t.category.value}): {t.description}\n  Commands: {cmd_purposes}\n  Install: {t.installation_method}")
+    for entry in curated[:5]:
+        status = "[INSTALLED ON HOST]" if entry.is_installed else "[NOT DETECTED ON HOST]"
+        command_purposes = "; ".join(command.purpose for command in entry.commands) or "No validated command template"
+        results.append(
+            f"• {entry.name} {status} ({entry.category.value}): {entry.description}\n"
+            f"  Guidance: {command_purposes}\n"
+            f"  Package: {entry.installation_method}\n"
+            f"  Documentation: {entry.documentation_url}"
+        )
 
-    return "\n\n".join(results)
+    indexed = kali_tool_index.search(query=query, limit=6)
+    curated_names = {entry.name.lower() for entry in curated}
+    for entry in indexed:
+        if entry["name"].lower() in curated_names:
+            continue
+        installed = entry["installed_path"]
+        status = f"[HOST INSTALLED: {installed}]" if installed else "[NOT DETECTED ON HOST]"
+        binaries = ", ".join(entry["binaries"][:6]) or entry["name"]
+        packages = ", ".join(entry["packages"][:4]) or "package not listed"
+        results.append(
+            f"• {entry['name']} {status} ({entry['category']}): {entry['summary']}\n"
+            f"  Executable aliases: {binaries}\n"
+            f"  Kali package(s): {packages}\n"
+            f"  Documentation: {entry['documentation_url'] or entry['source_url']}"
+        )
+
+    if not results:
+        if not kali_tool_index.records:
+            return (
+                "No curated tool matched. The Kali catalogue has not been synced yet. "
+                "The operator can run loki tools --sync-kali to load Kali's official tool index."
+            )
+        return f"No documented tools matched query: '{query}'."
+    return "\n\n".join(results[:10])
+
+
+@tool(
+    name="discover_kali_tools",
+    description=(
+        "Search the locally cached index synced from Kali Linux's official All Tools catalogue. "
+        "Use this before choosing an unfamiliar Kali command. Returns package names, executable aliases, "
+        "category, documentation, and whether a binary is detected on the Loki host. It does not install "
+        "or execute tools. This is a discovery tool, not target interaction."
+    ),
+    capabilities=[ToolCapability.UTILITY],
+)
+def discover_kali_tools(
+    query: str,
+    category: Optional[str] = None,
+    installed_only: bool = False,
+    limit: int = 8,
+) -> str:
+    """Find Kali tools by task, category, package, or executable name."""
+    matches = kali_tool_index.search(
+        query=query,
+        category=category,
+        installed_only=installed_only,
+        limit=limit,
+    )
+    if not matches:
+        if not kali_tool_index.records:
+            return (
+                "The Kali tool index is not synced. Ask the operator to run "
+                "loki tools --sync-kali; do not invent package names or executable flags."
+            )
+        return "No Kali catalogue matches were found. Try a broader task description or category."
+
+    lines = [
+        f"Kali catalogue results: {len(matches)} (cached index: {len(kali_tool_index.records)} source entries).",
+        f"Configured isolated shell image: {settings.shell_docker_image}. Host detection does not guarantee the binary exists inside this image.",
+    ]
+    for item in matches:
+        host_status = f"HOST INSTALLED at {item['installed_path']}" if item["is_installed"] else "NOT DETECTED ON HOST"
+        lines.append(
+            f"\n• {item['name']} — {item['category']} — {host_status}\n"
+            f"  Purpose: {item['summary']}\n"
+            f"  Packages: {', '.join(item['packages'][:6]) or 'not listed'}\n"
+            f"  Executables: {', '.join(item['binaries'][:8]) or 'not listed'}\n"
+            f"  Install hint (operator-run only): {item['install_hint']}\n"
+            f"  Docs: {item['documentation_url'] or item['source_url']}"
+        )
+    return "\n".join(lines)
+
+
+@tool(
+    name="check_kali_tool_availability",
+    description=(
+        "Check whether a Kali catalogue executable is present INSIDE Loki's configured Docker shell image. "
+        "This runs only command -v in a short-lived, network-disabled container. It does not execute the tool "
+        "or contact a target. Use this after discover_kali_tools and before run_command."
+    ),
+    capabilities=[ToolCapability.UTILITY],
+)
+async def check_kali_tool_availability(tool_name: str) -> str:
+    """Safely check command availability inside the configured isolated shell image."""
+    item = kali_tool_index.get_tool(tool_name)
+    if not item:
+        return (
+            f"No Kali catalogue entry found for '{tool_name}'. "
+            "Sync the official catalogue before checking availability."
+        )
+
+    aliases = []
+    for candidate in item["binaries"][:12]:
+        if re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", candidate):
+            aliases.append(candidate)
+    if not aliases and re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", item["name"]):
+        aliases.append(item["name"])
+    if not aliases:
+        return f"No safe executable alias was listed for {item['name']}."
+
+    import shlex
+    quoted = " ".join(shlex.quote(alias) for alias in aliases)
+    command = (
+        "for loki_tool in " + quoted +
+        '; do command -v "$loki_tool" && echo "$loki_tool FOUND" && exit 0; done; exit 127'
+    )
+    result = await IsolatedExecutionEngine.execute_shell(
+        command=command,
+        timeout_seconds=5.0,
+        image=settings.shell_docker_image,
+        allow_network=False,
+    )
+    if result.exit_code == 0 and result.stdout.strip():
+        return (
+            f"AVAILABLE IN ISOLATED IMAGE {settings.shell_docker_image}:\n"
+            f"{result.stdout.strip()}\n"
+            "This was a command-presence check only; the selected tool has not been executed."
+        )
+    if result.backend.value == "unavailable":
+        return (
+            f"Could not check the image {settings.shell_docker_image}: {result.stderr}\n"
+            "No host fallback was attempted."
+        )
+    return (
+        f"NOT AVAILABLE in isolated image {settings.shell_docker_image}. "
+        f"Checked aliases: {', '.join(aliases)}. Exit code: {result.exit_code}."
+    )
+
+
+@tool(
+    name="get_kali_tool_details",
+    description=(
+        "Get details for one Kali tool, package, or executable alias from the synced official index. "
+        "Returns package description when available locally, executable aliases, host installation status, "
+        "and official documentation. It never installs or runs the selected tool."
+    ),
+    capabilities=[ToolCapability.UTILITY],
+)
+def get_kali_tool_details(tool_name: str) -> str:
+    """Inspect a single Kali catalogue entry before proposing a command."""
+    item = kali_tool_index.get_tool(tool_name)
+    if not item:
+        return (
+            f"No Kali index entry found for '{tool_name}'. Sync the index with "
+            "loki tools --sync-kali or search with discover_kali_tools."
+        )
+    installed = item["installed_path"]
+    lines = [
+        f"{item['name']} ({item['category']})",
+        item.get("local_package_description") or item["summary"],
+        f"Packages: {', '.join(item['packages']) or 'not listed'}",
+        f"Executable aliases: {', '.join(item['binaries']) or 'not listed'}",
+        f"Detected on Loki host: {installed or 'No matching executable found on PATH'}",
+        f"Install hint (not executed by Loki): {item['install_hint']}",
+        f"Documentation: {item['documentation_url'] or item['source_url']}",
+        f"Configured isolated shell image: {settings.shell_docker_image}",
+        "Use check_kali_tool_availability to verify the binary inside that image before execution.",
+        "Use a documented, minimal command. Network actions still require a dedicated scoped network capability; the generic Docker shell remains network-disabled.",
+    ]
+    return "\n".join(lines)
 
 
 @tool(
@@ -775,6 +940,9 @@ ALL_SECURITY_TOOLS = [
     dns_lookup,
     verify_lab_data_access,
     search_tools,
+    discover_kali_tools,
+    get_kali_tool_details,
+    check_kali_tool_availability,
     get_cwe,
     get_owasp,
     audit_headers,

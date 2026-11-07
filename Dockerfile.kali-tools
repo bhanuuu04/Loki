@@ -1,0 +1,22 @@
+# Optional isolated image for offline Kali tooling and local analysis.
+#
+# Build a smaller image:
+#   docker build -f Dockerfile.kali-tools -t loki-kali-tools:latest .
+#
+# Build the full Kali metapackage (large download / disk footprint):
+#   docker build --build-arg KALI_TOOLSET=kali-linux-everything \
+#     -f Dockerfile.kali-tools -t loki-kali-everything:latest .
+#
+# Then set LOKI_SHELL_DOCKER_IMAGE=loki-kali-tools:latest in your local .env.
+# Loki still launches this image with --network=none by default.
+FROM kalilinux/kali-rolling
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG KALI_TOOLSET=kali-tools-top10
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \${KALI_TOOLSET} \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
