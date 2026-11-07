@@ -5,11 +5,27 @@ import pytest
 from loki.knowledge.tool_registry.performance_memory import (
     ToolPerformanceMemory,
     classify_task,
+    effective_tool_name,
     classify_tool_outcome,
 )
 from loki.runtime.agent import LokiAgent
 from loki.tools.base import Tool, ToolCapability
 from loki.types import LLMResponse, ToolCall, TokenUsage
+
+
+def test_effective_tool_name_extracts_kali_binary_from_shell_wrapper():
+    assert effective_tool_name(
+        "run_command",
+        {"command": "sudo nmap -sV example.test"},
+    ) == "nmap"
+    assert effective_tool_name(
+        "run_command",
+        {"command": "proxychains4 curl -I https://example.test"},
+    ) == "curl"
+    assert effective_tool_name(
+        "audit_http_security_headers",
+        {"url": "https://example.test"},
+    ) == "audit_http_security_headers"
 
 
 def test_task_categories_and_origin_ip_evidence_rules():
