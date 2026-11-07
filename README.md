@@ -196,7 +196,7 @@ Loki dynamically detects the host operating system (`PlatformDetector`) and sele
 | `/help` | Display list of available chat commands |
 | `/model [id]` | Select model with interactive arrow-key menu, or specify model ID |
 | `/provider <name>` | Switch provider (`nvidia`, `mock`, `gemini`, `openai`, `ollama`) |
-| `/mode <name>` | Switch execution mode (`safe`, `aggressive`, `advanced_audit`) |
+| `/mode <name>` | Switch execution mode (`safe`, `audit`, `nomercy`) |
 | `/scope [target]` | View authorized scope or add a target (`/scope add 192.168.1.1`) |
 | `/tools` | Display list of available security and system tools |
 | `/status` | View session token usage, turn count, and health stats |
