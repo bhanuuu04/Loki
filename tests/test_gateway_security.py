@@ -358,8 +358,6 @@ def test_ticket_revocation_persists_to_disk(monkeypatch, tmp_path):
     settings.operator_token = "test-operator-token-with-at-least-32-bytes"
     monkeypatch.setenv("LOKI_AUTH_SIGNING_KEY", "test-signing-key-with-at-least-32-bytes")
     monkeypatch.setenv("LOKI_AUTH_REVOCATION_FILE", str(tmp_path / "revoked.json"))
-    from loki.config import settings
-    settings.operator_token = "test-operator-token-with-at-least-32-bytes"
     token = OperatorAuthorizationManager.issue_ticket(
         "assessment-one", ["example.com"], operator_token=settings.operator_token
     )
