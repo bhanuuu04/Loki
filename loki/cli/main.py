@@ -289,7 +289,7 @@ def cli_entrypoint() -> None:
         console.print("\n[bold cyan]Running post-update diagnostics with the refreshed code...[/bold cyan]")
         try:
             diagnostic_run = subprocess.run(
-                [sys.executable, "-m", "loki.cli.main", "doctor"],
+                [updater.python_executable, "-m", "loki.cli.main", "doctor"],
                 cwd=str(updater.repo_dir),
                 check=False,
                 timeout=300,
