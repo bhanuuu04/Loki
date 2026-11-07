@@ -275,10 +275,11 @@ NOMERCY can verify that a seeded **dummy** record is retrievable, rather than tr
 
 The `verify_lab_data_access` tool:
 - Is available only in NOMERCY after explicit `/lab enable`.
-- Performs one HTTP GET to a target already in the active scope; optionally injects one supplied payload into one query parameter.
+- When no payload is supplied, performs one HTTP GET and reports direct canary data access without calling it an exploit.
+- When a payload is supplied, performs a no-payload control GET first, then one injected GET to the same scoped endpoint and query parameter.
 - Does not send cookies, credentials, or the canary marker; it does not follow redirects.
 - Requires a JSON response no larger than 64 KiB and an exact canary field match.
 - Returns only the matching fixture record, with sensitive-looking fields redacted. It does not dump tables, credentials, or unrelated records.
-- Stores a confirmed finding and response hash in the active assessment when the canary record is found.
+- Creates a confirmed injection finding only when the canary is absent from the control response and present in the payload response. If the record is already accessible without the payload, it reports data access but does not claim the payload caused an exploit.
 
 `/lab disable` immediately disables this proof-of-access tool. Python and shell execution remain in the existing Docker sandbox; generated scripts do not get unrestricted network access. This feature verifies data access through a scoped HTTP endpoint; it does not remotely execute scripts on the target.
