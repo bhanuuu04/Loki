@@ -430,6 +430,31 @@ class ScopeManager:
 
         return False, f"Target '{host}' is NOT in authorized scope. Permitted targets: {self.config.targets}"
 
+    def dns_observation_owner(self, target_ip: str) -> Optional[str]:
+        """Return an in-scope hostname whose current DNS answers include an IP.
+
+        This is informational only: a DNS-associated IP does not become authorized
+        for direct interaction, and it does not establish that the IP is an origin.
+        """
+        host = self.normalize_target(target_ip)
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return None
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+
+        for authorized_host in sorted(self._parsed_targets):
+            # Direct IP/CIDR entries are already handled by is_in_scope().
+            if self._parse_ip_or_network(authorized_host) is not None:
+                continue
+            authorized, _ = self.is_in_scope(authorized_host, check_dns=False)
+            if not authorized:
+                continue
+            if address in self._resolve_host(authorized_host):
+                return authorized_host
+        return None
+
     def _resolve_host(self, host: str) -> List[Union[ipaddress.IPv4Address, ipaddress.IPv6Address]]:
         """Resolves hostname to IP addresses with local caching."""
         if host in self._dns_cache:
