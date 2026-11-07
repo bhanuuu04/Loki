@@ -28,6 +28,8 @@ from loki.knowledge.tool_registry.performance_memory import classify_task, tool_
 from loki.executor.process_manager import SecureProcessExecutor
 from loki.executor.output_parser import OutputParser
 from loki.assessment.store import AssessmentStore
+from loki.assessment.chain_analysis import analyze_attack_chains, normalize_capabilities, CHAIN_CAPABILITIES
+from loki.assessment.validator import FindingValidator
 from loki.assessment.models import (
     DiscoveredAsset,
     SecurityFinding,
@@ -518,7 +520,7 @@ async def audit_headers(url: str) -> str:
 
 @tool(
     name="record_security_finding",
-    description="Record a validated vulnerability or configuration weakness into the assessment report.",
+    description="Record a vulnerability only when its exact evidence excerpt is present in a real, integrity-checked Loki evidence record from the active assessment.",
     capabilities=[ToolCapability.UTILITY],
 )
 def record_finding(
@@ -529,15 +531,63 @@ def record_finding(
     affected_asset: str,
     severity: str,
     remediation: str,
+    evidence_record_id: str,
+    evidence: str,
     cwe_id: Optional[str] = None,
     cvss_score: float = 0.0,
-    evidence: str = "",
+    requires: Optional[list] = None,
+    enables: Optional[list] = None,
 ) -> str:
-    """Record finding into assessment store."""
+    """Persist a finding only when its evidence is anchored to a real tool result."""
+    ctx = AssessmentSecurityContext.get_default()
+    active_id = ctx.active_assessment_id
+    if not active_id or session_id != active_id:
+        return "Finding rejected: session_id must match the active, operator-configured assessment."
+
+    session = assessment_store.load_assessment(session_id)
+    if not session:
+        return "Finding rejected: active assessment session could not be loaded."
+
+    in_scope, scope_reason = scope_mgr.is_in_scope(affected_asset)
+    if not in_scope:
+        return f"Finding rejected: affected asset is not in scope. {scope_reason}"
+
+    evidence_record = assessment_store.get_evidence(session_id, evidence_record_id)
+    if not evidence_record:
+        return "Finding rejected: evidence_record_id does not identify a stored record in this assessment."
+
+    record_metadata = evidence_record.get("metadata") or {}
+    if record_metadata.get("authorized") is not True:
+        return "Finding rejected: the referenced tool result is not marked as authorized by Loki's execution gateway."
+
+    raw_output = str(evidence_record.get("raw_output") or "")
+    stored_hash = str(evidence_record.get("output_hash") or "")
+    actual_hash = hashlib.sha256(raw_output.encode("utf-8", errors="replace")).hexdigest()
+    excerpt = evidence.strip()
+    if not raw_output or stored_hash != actual_hash:
+        return "Finding rejected: stored evidence is empty or its integrity hash does not match."
+    if len(excerpt) < 15 or len(excerpt) > 2000 or excerpt not in raw_output:
+        return "Finding rejected: evidence must be a 15–2000 character exact excerpt from the referenced tool output."
+
     try:
         sev = SeverityLevel(severity.lower())
-    except ValueError:
-        sev = SeverityLevel.MEDIUM
+    except (ValueError, AttributeError):
+        return "Finding rejected: severity must be informational, low, medium, high, or critical."
+    if not 0.0 <= float(cvss_score) <= 10.0:
+        return "Finding rejected: cvss_score must be between 0.0 and 10.0."
+
+    normalized_requires = normalize_capabilities(requires)
+    normalized_enables = normalize_capabilities(enables)
+    requested_capabilities = {
+        str(item).strip().lower().replace("-", "_").replace(" ", "_")
+        for item in (requires or []) + (enables or [])
+    }
+    rejected_capabilities = sorted(requested_capabilities - CHAIN_CAPABILITIES)
+    if rejected_capabilities:
+        return (
+            "Finding rejected: unsupported chain capability label(s): "
+            + ", ".join(rejected_capabilities)
+        )
 
     finding = SecurityFinding(
         finding_id=finding_id,
@@ -546,14 +596,85 @@ def record_finding(
         affected_asset=affected_asset,
         category="Vulnerability Assessment",
         cwe_id=cwe_id,
-        cvss_score=cvss_score,
+        cvss_score=float(cvss_score),
         severity=sev,
-        confidence=ConfidenceLevel.CONFIRMED,
-        evidence=evidence,
+        confidence=ConfidenceLevel.POTENTIAL,
+        lifecycle=FindingLifecycle.DISCOVERED,
+        source=FindingSource.TOOL_CONFIRMED,
+        assessment_id=session_id,
+        tool_execution_id=str(evidence_record.get("task_id") or ""),
+        evidence_record_id=evidence_record_id,
+        evidence_provenance=f"tool:{evidence_record.get('tool_name', 'unknown')}",
+        evidence=excerpt,
+        evidence_hash=hashlib.sha256(excerpt.encode("utf-8", errors="replace")).hexdigest(),
+        requires=normalized_requires,
+        enables=normalized_enables,
         remediation=remediation,
     )
+    finding = FindingValidator.validate_and_refine(
+        finding,
+        raw_response_text=raw_output,
+    )
     assessment_store.add_finding(session_id, finding)
-    return f"Finding '{finding_id}: {title}' recorded in session '{session_id}'."
+    summary = (
+        f"Finding '{finding_id}: {title}' recorded. "
+        f"Status: {finding.lifecycle.value}; confidence: {finding.confidence.value}; "
+        f"severity: {finding.severity.value}; evidence: {evidence_record_id}. "
+        "The finding is not a confirmed end-to-end attack chain."
+    )
+    refreshed = assessment_store.load_assessment(session_id)
+    if refreshed and len(refreshed.findings) >= 2:
+        summary += "\\n\\nAUTOMATIC CROSS-FINDING CORRELATION\\n" + analyze_chains(session_id)
+    return summary
+
+
+@tool(
+    name="analyze_attack_chains",
+    description="Correlate two or more in-scope, integrity-checked findings using evidence-supported prerequisite and enabled-capability labels. Returns potential chains only; it never proves combined impact.",
+    capabilities=[ToolCapability.UTILITY],
+)
+def analyze_chains(session_id: str) -> str:
+    """Correlate supported finding relationships without upgrading severity."""
+    ctx = AssessmentSecurityContext.get_default()
+    if not ctx.active_assessment_id or session_id != ctx.active_assessment_id:
+        return "Attack-chain analysis rejected: session_id must match the active assessment."
+
+    session = assessment_store.load_assessment(session_id)
+    if not session:
+        return "Attack-chain analysis unavailable: assessment session could not be loaded."
+    if len(session.findings) < 2:
+        return "No chain analysis performed: at least two recorded findings are required."
+
+    candidates = analyze_attack_chains(
+        session.findings,
+        evidence_lookup=lambda evidence_id: assessment_store.get_evidence(
+            session_id, evidence_id
+        ),
+        scope_check=scope_mgr.is_in_scope,
+    )
+    if not candidates:
+        return (
+            "No evidence-backed candidate attack chains found. This does not prove "
+            "that no chain exists; findings may lack verified evidence links, explicit "
+            "prerequisites, or supported capability labels."
+        )
+
+    lines = [
+        f"Potential attack-chain candidates: {len(candidates)}",
+        "All candidates are hypotheses, not confirmed exploit paths. Do not combine finding severities.",
+    ]
+    for candidate in candidates:
+        lines.extend([
+            "",
+            f"{candidate.chain_id} — POTENTIAL",
+            f"  Finding sequence: {' -> '.join(candidate.finding_ids)}",
+            f"  Matched capability: {', '.join(candidate.capabilities)}",
+            f"  Affected assets: {', '.join(candidate.affected_assets)}",
+            f"  Evidence records: {', '.join(candidate.evidence_record_ids)}",
+            "  Validation required: perform a separately scoped, low-impact end-to-end check "
+            "and capture direct evidence of the combined impact before calling the chain verified.",
+        ])
+    return "\n".join(lines)
 
 
 @tool(
@@ -985,5 +1106,6 @@ ALL_SECURITY_TOOLS = [
     get_owasp,
     audit_headers,
     record_finding,
+    analyze_chains,
     generate_report,
 ]

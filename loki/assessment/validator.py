@@ -102,8 +102,9 @@ class FindingValidator:
             if finding.evidence or (finding.reproduction and finding.reproduction.response_status):
                 score += 1
 
-        # Model hypothesis can only be CONFIRMED if reproduction was executed and verified
-        if score >= 6 and (has_reproduction or finding.source != FindingSource.MODEL_HYPOTHESIS):
+        # A scanner/tool observation alone never proves exploitability. Confirmation
+        # requires an explicit successful reproduction record, regardless of source.
+        if score >= 6 and has_reproduction:
             return ConfidenceLevel.CONFIRMED
         elif score >= 4:
             return ConfidenceLevel.HIGH

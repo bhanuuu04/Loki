@@ -16,6 +16,7 @@ from loki.assessment.models import (
     AssessmentSession,
     DiscoveredAsset,
     FindingLifecycle,
+    FindingSource,
     ReproductionRecord,
     SecurityFinding,
     SeverityLevel,
@@ -88,6 +89,14 @@ class DatabaseManager:
                     severity TEXT NOT NULL,
                     confidence TEXT NOT NULL,
                     lifecycle TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'model_hypothesis',
+                    assessment_id TEXT,
+                    task_id TEXT,
+                    tool_execution_id TEXT,
+                    evidence_record_id TEXT,
+                    evidence_provenance TEXT,
+                    requires_json TEXT,
+                    enables_json TEXT,
                     evidence TEXT,
                     evidence_hash TEXT,
                     reproduction_json TEXT,
@@ -137,6 +146,27 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_evidence_session ON evidence(session_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             """)
+
+            # Backward-compatible finding metadata migration. Older Loki databases
+            # lack provenance and chain labels; add nullable/defaulted columns in place.
+            finding_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(findings)").fetchall()
+            }
+            finding_migrations = {
+                "source": "TEXT NOT NULL DEFAULT 'model_hypothesis'",
+                "assessment_id": "TEXT",
+                "task_id": "TEXT",
+                "tool_execution_id": "TEXT",
+                "evidence_record_id": "TEXT",
+                "evidence_provenance": "TEXT",
+                "requires_json": "TEXT",
+                "enables_json": "TEXT",
+            }
+            for column, definition in finding_migrations.items():
+                if column not in finding_columns:
+                    conn.execute(
+                        f"ALTER TABLE findings ADD COLUMN {column} {definition}"
+                    )
 
     # -------------------------------------------------------------
     # ASSESSMENT TRANSACTIONS
@@ -199,9 +229,11 @@ class DatabaseManager:
                     INSERT INTO findings (
                         finding_id, session_id, title, description, affected_asset, affected_endpoint,
                         category, cwe_id, cve_id, cvss_score, severity, confidence, lifecycle,
+                        source, assessment_id, task_id, tool_execution_id, evidence_record_id,
+                        evidence_provenance, requires_json, enables_json,
                         evidence, evidence_hash, reproduction_json, false_positive_score,
                         false_positive_reasons, remediation, references_json, discovered_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(finding_id) DO UPDATE SET
                         title=excluded.title,
                         description=excluded.description,
@@ -210,6 +242,14 @@ class DatabaseManager:
                         severity=excluded.severity,
                         confidence=excluded.confidence,
                         lifecycle=excluded.lifecycle,
+                        source=excluded.source,
+                        assessment_id=excluded.assessment_id,
+                        task_id=excluded.task_id,
+                        tool_execution_id=excluded.tool_execution_id,
+                        evidence_record_id=excluded.evidence_record_id,
+                        evidence_provenance=excluded.evidence_provenance,
+                        requires_json=excluded.requires_json,
+                        enables_json=excluded.enables_json,
                         evidence=excluded.evidence,
                         evidence_hash=excluded.evidence_hash,
                         reproduction_json=excluded.reproduction_json,
@@ -232,6 +272,14 @@ class DatabaseManager:
                         finding.severity.value,
                         finding.confidence.value,
                         finding.lifecycle.value,
+                        finding.source.value,
+                        finding.assessment_id or session.session_id,
+                        finding.task_id,
+                        finding.tool_execution_id,
+                        finding.evidence_record_id,
+                        finding.evidence_provenance,
+                        json.dumps(finding.requires),
+                        json.dumps(finding.enables),
                         finding.evidence,
                         finding.evidence_hash,
                         finding.reproduction.model_dump_json() if finding.reproduction else None,
@@ -287,6 +335,14 @@ class DatabaseManager:
                     severity=SeverityLevel(f_row["severity"]),
                     confidence=ConfidenceLevel(f_row["confidence"]),
                     lifecycle=FindingLifecycle(f_row["lifecycle"]),
+                    source=FindingSource(f_row["source"] or FindingSource.MODEL_HYPOTHESIS.value),
+                    assessment_id=f_row["assessment_id"] or session_id,
+                    task_id=f_row["task_id"],
+                    tool_execution_id=f_row["tool_execution_id"],
+                    evidence_record_id=f_row["evidence_record_id"],
+                    evidence_provenance=f_row["evidence_provenance"],
+                    requires=json.loads(f_row["requires_json"] or "[]"),
+                    enables=json.loads(f_row["enables_json"] or "[]"),
                     evidence=f_row["evidence"] or "",
                     evidence_hash=f_row["evidence_hash"],
                     reproduction=repro,
@@ -371,6 +427,28 @@ class DatabaseManager:
                 ),
             )
         return evidence_id
+
+    def get_evidence(self, session_id: str, evidence_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve one evidence record scoped to its owning assessment."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT evidence_id, session_id, task_id, tool_name, command_args, "
+                "output_hash, raw_output, metadata_json, created_at "
+                "FROM evidence WHERE evidence_id = ? AND session_id = ?",
+                (evidence_id, session_id),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        try:
+            result["command_args"] = json.loads(result.get("command_args") or "[]")
+        except (TypeError, ValueError):
+            result["command_args"] = []
+        try:
+            result["metadata"] = json.loads(result.get("metadata_json") or "{}")
+        except (TypeError, ValueError):
+            result["metadata"] = {}
+        return result
 
     # -------------------------------------------------------------
     # CONVERSATION SESSION MEMORY

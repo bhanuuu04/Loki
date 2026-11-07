@@ -209,7 +209,7 @@ Replace `example.test` with a domain, IP address, or host that you own or have w
 | **AUDIT** | Controlled active vulnerability testing within the approved scope |
 | **NOMERCY** | Highest testing intensity, including recognized credential-audit tools after explicit operator confirmation |
 
-NOMERCY requires an interactive confirmation. Destructive actions and denial-of-service or stress testing remain blocked.
+NOMERCY requires one explicit interactive confirmation when the mode is enabled. That is an engagement-level choice, not a per-command prompt. Once scope and mode are configured, Loki executes supported, non-destructive commands in scope without asking you to approve each one. The gateway still blocks out-of-scope targets, disallowed operations, and tools requiring separate elevated approval. Destructive actions and denial-of-service or stress testing remain blocked.
 
 ### 3. Run checks and review results
 
@@ -224,6 +224,38 @@ Useful commands:
 Ask Loki to perform a specific assessment task and keep the target, objective, and constraints explicit. Review the evidence and findings before treating a result as confirmed.
 
 ---
+
+## 🧩 Evidence-backed vulnerability and attack-chain assessments
+
+You can give Loki a broad assessment objective after configuring an authorized target and the appropriate mode:
+
+```text
+Perform a detailed vulnerability assessment of the in-scope application.
+Validate important findings, correlate them into possible attack chains,
+and verify combined impact where a safe supported test exists.
+```
+
+Loki is instructed to investigate the attack surface in phases, choose supported checks based on observed technologies, validate scanner leads, and keep trying materially different in-scope methods within the run budget. It does not ask for approval before every routine command once the engagement scope and mode are set.
+
+### Evidence is required
+
+Successful tool outputs authorized by the Execution Gateway are automatically stored as bounded, secret-redacted evidence while an assessment is active. Loki attaches a stable evidence marker to the tool result:
+
+`[LOKI_EVIDENCE_ID: <id>]`
+
+A finding must cite an evidence ID from the active assessment and provide an exact excerpt from that stored result. Loki checks the evidence record's integrity hash and rejects missing, unauthorized, mismatched, cross-assessment, or fabricated excerpts. A scanner alert, version banner, HTTP status, reflected payload, or model hypothesis is a lead—not proof that a vulnerability is exploitable.
+
+A finding remains potential or validating until a successful reproduction record demonstrates the behavior. Reports should separate observations, inferences, confirmed findings, false positives, and blocked or untested checks.
+
+### Automatic cross-finding correlation
+
+After at least two findings are recorded, Loki automatically checks whether the evidence-backed findings have compatible prerequisites and capabilities. The correlator uses a limited vocabulary such as authenticated low-privilege access, sensitive read/write, SSRF, file read, privilege escalation, and tenant-boundary crossing.
+
+A match is reported as a **potential chain candidate**. It does not prove the sequence is feasible or the combined impact. Loki must identify missing links and perform scoped, non-destructive follow-up verification where supported. It must never add severities or claim a critical chain solely by combining two individually weak findings.
+
+A chain is verified only after a controlled, in-scope end-to-end reproduction directly demonstrates the combined impact and the result is captured as evidence. For proof-of-access, use a disposable lab and seeded canary records—not real user data.
+
+See [SECURITY.md](SECURITY.md) for the engagement authorization and safety policy and [docs/ATTACK_CHAIN_ASSESSMENT.md](docs/ATTACK_CHAIN_ASSESSMENT.md) for the detailed workflow and evidence model.
 
 ## 🧠 Adaptive investigations and tool learning
 
@@ -556,9 +588,11 @@ Contributions are welcome. For substantial changes, open an issue first to discu
 Loki is an assessment framework, not permission to test arbitrary systems.
 
 - Only assess targets you own or have explicit authorization to test.
-- Assessment modes do not expand the configured target scope.
-- High-intensity modes require operator confirmation.
-- Destructive and denial-of-service actions remain blocked.
+- The authenticated operator's configured scope and selected mode are the engagement-level authorization for ordinary supported checks; Loki does not ask for a repeated permission prompt before every command.
+- Every command still passes the Execution Gateway. Assessment modes do not expand target scope, and exclusions, isolation, rate limits, and tool-specific policy remain enforced.
+- NOMERCY requires one explicit confirmation when the mode is enabled. Tools marked as requiring separate elevated approval remain gated.
+- Destructive, denial-of-service, stress, persistence, backdoor, reverse-shell, lateral-movement, unauthorized credential-theft, and real-user-data extraction actions remain outside the autonomous assessment workflow.
+- Findings must cite exact excerpts from integrity-checked evidence records. Attack-chain correlation emits potential candidates only; combined impact requires direct end-to-end reproduction.
 - Generated shell and Python tasks run through the configured Docker isolation path; Python execution is network-disabled.
 - The lab verifier is limited to scoped GET requests and seeded canary fixtures. It is not an arbitrary data-extraction tool or a remote code-execution feature.
 - Do not enable unrestricted container network access as a shortcut around scope enforcement.
