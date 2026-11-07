@@ -15,6 +15,7 @@ from typing import Dict
 from dotenv import dotenv_values
 
 SECURITY_ENV_KEYS = ("LOKI_OPERATOR_TOKEN", "LOKI_AUTH_SIGNING_KEY")
+_LOADED_FROM_FILE: Dict[str, str] = {}
 
 
 def get_security_env_path() -> Path:
@@ -49,6 +50,7 @@ def load_security_environment() -> Path:
             value = values.get(key)
             if value and len(str(value).encode("utf-8")) >= 32 and not os.environ.get(key):
                 os.environ[key] = str(value)
+                _LOADED_FROM_FILE[key] = str(value)
     return path
 
 
@@ -85,17 +87,7 @@ def ensure_security_secrets() -> Dict[str, object]:
     never copied into Loki's private file. Missing secrets are generated once.
     """
     path = load_security_environment()
-    external_values = {
-        key: os.environ.get(key, "").strip()
-        for key in SECURITY_ENV_KEYS
-    }
-    for key, value in external_values.items():
-        if value and len(value.encode("utf-8")) < 32:
-            raise RuntimeError(
-                f"{key} is configured but is shorter than 32 bytes. "
-                "Provide a stronger secret or remove it to let Loki generate one."
-            )
-
+    external_values: Dict[str, str] = {}
     stored: Dict[str, str] = {}
     if path.exists():
         values = dotenv_values(path)
@@ -108,25 +100,34 @@ def ensure_security_secrets() -> Dict[str, object]:
     created = []
     private_values: Dict[str, str] = {}
     for key in SECURITY_ENV_KEYS:
-        value = external_values[key] or stored.get(key)
-        if value and len(value.encode("utf-8")) < 32:
-            # A damaged/obsolete locally generated secret is safely rotated.
-            value = ""
-        if not value:
-            value = secrets.token_urlsafe(48)
-            created.append(key)
-            private_values[key] = value
-        elif key in stored:
+        current = os.environ.get(key, "").strip()
+        loaded_from_file = bool(current) and _LOADED_FROM_FILE.get(key) == current
+        external = current if current and not loaded_from_file else ""
+        if external and len(external.encode("utf-8")) < 32:
+            raise RuntimeError(
+                f"{key} is configured but is shorter than 32 bytes. "
+                "Provide a stronger secret or remove it to let Loki generate one."
+            )
+
+        if external:
+            # Explicit process/.env values win, but are never copied into Loki's file.
+            value = external
+            if key in stored:
+                private_values[key] = stored[key]
+        else:
+            value = stored.get(key, "")
+            if value and len(value.encode("utf-8")) < 32:
+                # A damaged/obsolete locally generated secret is safely rotated.
+                value = ""
+            if not value:
+                value = secrets.token_urlsafe(48)
+                created.append(key)
             private_values[key] = value
 
         os.environ[key] = value
 
-    # Keep only locally managed secrets in this file; externally injected values
-    # remain in their configured secret manager/environment.
+    # Persist only locally generated or previously locally stored credentials.
     if private_values:
-        for key in SECURITY_ENV_KEYS:
-            if key not in private_values and key in stored:
-                private_values[key] = stored[key]
         _write_private_file(path, private_values)
 
     # config.py creates settings before CLI setup runs; refresh its cached token.
