@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.error import URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
+from pydantic import BaseModel
 import json
 import os
 import re
