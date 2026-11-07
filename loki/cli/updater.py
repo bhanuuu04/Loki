@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 import re
 import subprocess
 import sys
+import sysconfig
 from typing import Callable, List, Optional
 from urllib.parse import urlparse
 
@@ -33,6 +35,35 @@ class UpdateError(RuntimeError):
     """A safe update could not continue."""
 
 
+def _active_environment_python() -> Optional[str]:
+    """Return the Python executable in the shell's active venv/Conda environment."""
+    prefix = os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX")
+    if not prefix:
+        return None
+
+    environment_dir = Path(prefix).expanduser()
+    if os.name == "nt":
+        candidates = [environment_dir / "Scripts" / "python.exe"]
+    else:
+        candidates = [
+            environment_dir / "bin" / "python",
+            environment_dir / "bin" / "python3",
+        ]
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _is_externally_managed_system_python() -> bool:
+    """Detect PEP 668 only for the base interpreter, never for a virtualenv."""
+    if sys.prefix != sys.base_prefix:
+        return False
+    stdlib = sysconfig.get_path("stdlib")
+    return bool(stdlib and (Path(stdlib) / "EXTERNALLY-MANAGED").is_file())
+
+
 class LokiUpdater:
     """Fast-forward-only updater for an official Loki source checkout.
 
@@ -49,7 +80,18 @@ class LokiUpdater:
     ) -> None:
         self.repo_dir = Path(repo_dir or Path(__file__).resolve().parents[2]).resolve()
         self.command_runner = command_runner
-        self.python_executable = python_executable or sys.executable
+        active_python = _active_environment_python()
+        self.using_active_environment = bool(active_python)
+        self.python_executable = (
+            python_executable
+            or active_python
+            or sys.executable
+        )
+        self.externally_managed_python = (
+            not python_executable
+            and not active_python
+            and _is_externally_managed_system_python()
+        )
         self.branch = branch
 
     @staticmethod
@@ -223,28 +265,42 @@ class LokiUpdater:
             current_commit = self._git("rev-parse", "HEAD")
 
             if not skip_dependencies:
-                pip_result = self._run(
-                    [
-                        self.python_executable,
-                        "-m",
-                        "pip",
-                        "install",
-                        "--upgrade",
-                        "-e",
-                        ".",
-                    ],
-                    timeout=600,
-                )
-                dependency_ok = pip_result.returncode == 0
-                if dependency_ok:
-                    details.append("Editable install and declared dependencies refreshed.")
-                else:
-                    detail = (
-                        pip_result.stderr or pip_result.stdout or "No pip output returned"
-                    ).strip()
+                if self.externally_managed_python:
+                    dependency_ok = False
                     details.append(
-                        "Dependency refresh failed: " + detail[-1600:]
+                        "Dependency refresh was not attempted: this is a PEP 668 "
+                        "externally managed system Python. Activate Loki's virtual "
+                        "environment and rerun 'loki update'. Example: "
+                        "'source .venv/bin/activate && python -m pip install --upgrade -e .'."
                     )
+                else:
+                    if self.using_active_environment:
+                        details.append(
+                            f"Using active environment interpreter: {self.python_executable}"
+                        )
+                    pip_result = self._run(
+                        [
+                            self.python_executable,
+                            "-m",
+                            "pip",
+                            "install",
+                            "--upgrade",
+                            "-e",
+                            ".",
+                        ],
+                        timeout=600,
+                    ) if not self.externally_managed_python else None
+                    if pip_result is not None:
+                        dependency_ok = pip_result.returncode == 0
+                        if dependency_ok:
+                            details.append("Editable install and declared dependencies refreshed.")
+                        else:
+                            detail = (
+                                pip_result.stderr or pip_result.stdout or "No pip output returned"
+                            ).strip()
+                            details.append(
+                                "Dependency refresh failed: " + detail[-1600:]
+                            )
             else:
                 details.append("Dependency refresh skipped by operator.")
 
