@@ -54,9 +54,9 @@ Loki correlates findings only when each finding:
 - Has sufficient confidence and is not marked as a likely false positive.
 - Declares supported `requires` and/or `enables` capability labels grounded in that evidence.
 
-A matching capability relationship produces a **potential chain candidate**, not a verified exploit path. Loki must identify the missing preconditions and use scoped, non-destructive follow-up checks where supported. It must not add together the severities of separate findings or label a chain critical solely because its individual findings look serious.
+A matching capability relationship produces a **potential chain candidate**, not a verified exploit path. Loki must identify missing preconditions and use scoped, non-destructive follow-up checks where supported. It must not add together the severities of separate findings or label a chain critical solely because its individual findings look serious.
 
-A chain may be described as verified only after a separately scoped, controlled end-to-end reproduction directly demonstrates the combined impact and that result is captured as evidence. Proof-of-access checks must use disposable labs and seeded canary records. No real customer or user data should be retrieved to prove impact.
+A chain may be described as verified only after a separately scoped, controlled end-to-end reproduction directly demonstrates the combined impact and that result is captured as evidence. Only then may Loki assess the combined impact independently and rate it critical when the reproduced consequence justifies that rating; component severities are never added. Proof-of-access checks must use disposable labs and seeded canary records. No real customer or user data should be retrieved to prove impact.
 
 ## Reporting requirements
 
