@@ -60,6 +60,7 @@ Loki can be used through its interactive CLI or its local FastAPI-based Web UI.
 | **Execution adapters** | Native Windows and Linux support, WSL2 integration, and Docker-based isolation |
 | **Interfaces** | Interactive terminal, FastAPI endpoints, and a browser-based UI |
 | **Diagnostics** | `loki doctor` for environment and dependency checks |
+| **Self-update** | `loki update` fetches official fixes, fast-forwards safely, refreshes dependencies, and runs diagnostics |
 
 ### How the pieces fit together
 
@@ -145,12 +146,15 @@ Choose a provider from the menu:
 
 The wizard saves provider settings locally. You can rerun it later with `loki onboard --reset`.
 
-### 5. Check your installation and launch Loki
+### 5. Check, update, and launch Loki
 
 ```bash
 loki doctor
+loki update
 loki
 ```
+
+`loki update` fetches the latest official `main` commits, performs a fast-forward-only update, refreshes the editable install and declared dependencies, then runs `loki doctor`. It leaves `.env`, assessments, and the local database untouched. Restart Loki after the command completes so the running process loads the new code.
 
 That’s it. Loki opens its interactive terminal session.
 
@@ -481,6 +485,14 @@ A direct canary match proves that the seeded record was retrievable. It does **n
 ## ⌨️ Command reference
 
 ### Terminal commands
+
+| Command | Action |
+| --- | --- |
+| `loki update` | Update from official `main`, refresh dependencies, and run diagnostics |
+| `loki update --check` | Check whether official commits are available without changing local source or dependencies |
+| `loki update --skip-dependencies` | Fast-forward source only, then run diagnostics |
+
+The updater refuses to modify a dirty working tree, a non-`main` branch, a non-official `origin`, or diverged local history. It never runs `reset --hard`, force-checks out a branch, or stashes local work. Commit or stash local changes yourself before updating. If diagnostics still find a problem, the command reports it rather than claiming it has repaired arbitrary application bugs.
 
 | Command | Purpose |
 | --- | --- |
