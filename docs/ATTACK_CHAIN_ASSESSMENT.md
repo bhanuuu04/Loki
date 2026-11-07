@@ -13,7 +13,7 @@ The authenticated operator configures:
 - Assessment name and target domains/IPs/CIDRs.
 - Explicit exclusions and any port restrictions.
 - Allowed subdomain behavior and other scope settings.
-- Execution mode (\`SAFE\`, \`AUDIT\`, or explicitly confirmed \`NOMERCY\`).
+- Execution mode (`SAFE`, `AUDIT`, or explicitly confirmed `NOMERCY`).
 - Any special test constraints, time windows, and lab-only proof requirements.
 
 After this setup, the scope and mode are the engagement-level authorization for ordinary supported actions. Every call still passes through the Execution Gateway. The model cannot authorize a new host, remove an exclusion, change mode, or override a block.
@@ -29,9 +29,9 @@ Use supported, scope-aware methods to identify DNS records, subdomains, resolved
 Select checks based on the actual technologies and reachable attack surface. Prefer more than one independent evidence source for important claims. A scanner result is a lead; a banner or version number alone does not demonstrate a vulnerable code path.
 
 Use the configured mode:
-- \`SAFE\`: passive and low-impact checks.
-- \`AUDIT\`: controlled active validation supported by Loki.
-- \`NOMERCY\`: the broadest supported set after one explicit mode confirmation.
+- `SAFE`: passive and low-impact checks.
+- `AUDIT`: controlled active validation supported by Loki.
+- `NOMERCY`: the broadest supported set after one explicit mode confirmation.
 
 Do not treat a missing tool as evidence that a target is secure. Search the catalogue for alternatives, inspect the tool's actual availability, or report the capability gap.
 
@@ -51,14 +51,14 @@ Do not equate scanner confidence with proof. A finding without a verified reprod
 
 When an active assessment exists, successful tool results authorized by the Execution Gateway are stored as bounded, secret-redacted evidence. The tool result includes a stable marker:
 
-\`[LOKI_EVIDENCE_ID: <id>]\`
+`[LOKI_EVIDENCE_ID: <id>]`
 
 The evidence record contains the tool name, assessment ID, task/call identifier, target metadata, execution timing, sanitized output, and output hash. Common authorization headers, cookies, bearer/basic credentials, JWTs, and credential-like query parameters are redacted before the evidence is stored and shown to the model.
 
 When recording a vulnerability, Loki must provide:
 
-- The active \`session_id\`.
-- An \`evidence_record_id\` emitted by Loki for that assessment.
+- The active `session_id`.
+- An `evidence_record_id` emitted by Loki for that assessment.
 - An exact 15–2000 character excerpt from that stored output.
 - An in-scope affected asset.
 - A severity and CVSS estimate justified by the demonstrated technical impact.
@@ -70,30 +70,30 @@ The recorder rejects missing or cross-assessment evidence IDs, unauthorized evid
 
 After at least two findings have been recorded, Loki automatically runs cross-finding correlation. It can also be called directly:
 
-\`\`\`text
+```text
 analyze_attack_chains(session_id)
-\`\`\`
+```
 
 The correlator checks the indexed evidence records and builds candidate links using a small, explicit vocabulary:
 
 | Capability | Meaning |
 | --- | --- |
-| \`unauthenticated_access\` | A verified action was accessible without authentication |
-| \`authenticated_low_privilege\` | A verified action was available to a low-privilege test principal |
-| \`sensitive_read\` | Evidence demonstrates access to a designated test/sensitive object |
-| \`sensitive_write\` | Evidence demonstrates a controlled write to a designated test object |
-| \`internal_service_access\` | A permitted in-scope test demonstrated access to an internal service |
-| \`ssrf\` | A controlled test demonstrated server-side request behavior |
-| \`file_read\` | A controlled test demonstrated reading an approved fixture file |
-| \`code_execution\` | A controlled test demonstrated execution of a harmless marker |
-| \`privilege_escalation\` | A test principal demonstrably gained a higher privilege |
-| \`session_takeover\` | A controlled test demonstrated another test session could be assumed |
-| \`account_takeover\` | A controlled test demonstrated control of a test account |
-| \`security_control_bypass\` | A specific control was demonstrably bypassed |
-| \`admin_function_access\` | A test principal demonstrably invoked a restricted admin function |
-| \`tenant_boundary_crossing\` | A tenant-isolation test demonstrated crossing between designated test tenants |
+| `unauthenticated_access` | A verified action was accessible without authentication |
+| `authenticated_low_privilege` | A verified action was available to a low-privilege test principal |
+| `sensitive_read` | Evidence demonstrates access to a designated test/sensitive object |
+| `sensitive_write` | Evidence demonstrates a controlled write to a designated test object |
+| `internal_service_access` | A permitted in-scope test demonstrated access to an internal service |
+| `ssrf` | A controlled test demonstrated server-side request behavior |
+| `file_read` | A controlled test demonstrated reading an approved fixture file |
+| `code_execution` | A controlled test demonstrated execution of a harmless marker |
+| `privilege_escalation` | A test principal demonstrably gained a higher privilege |
+| `session_takeover` | A controlled test demonstrated another test session could be assumed |
+| `account_takeover` | A controlled test demonstrated control of a test account |
+| `security_control_bypass` | A specific control was demonstrably bypassed |
+| `admin_function_access` | A test principal demonstrably invoked a restricted admin function |
+| `tenant_boundary_crossing` | A tenant-isolation test demonstrated crossing between designated test tenants |
 
-A finding's \`enables\` list describes a capability its evidence demonstrates. A finding's \`requires\` list describes a precondition that must be satisfied. A link is emitted only when one finding's enabled capability matches another finding's prerequisite.
+A finding's `enables` list describes a capability its evidence demonstrates. A finding's `requires` list describes a precondition that must be satisfied. A link is emitted only when one finding's enabled capability matches another finding's prerequisite.
 
 ### What a candidate means
 
