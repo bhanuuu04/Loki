@@ -25,6 +25,7 @@ from loki.cli.doctor import LokiDoctor
 from loki.cli.setup import run_setup_wizard
 from loki.cli.interface import LokiConversationalCLI
 from loki.cli.model_cmd import run_model_command
+from loki.security_bootstrap import ensure_security_secrets
 from loki.providers.factory import get_provider
 from loki.providers.compatibility import ModelCompatibilityTester
 
@@ -173,6 +174,15 @@ def cli_entrypoint() -> None:
     chat_parser.add_argument("--max-steps", "-m", type=int, default=10, help="Maximum step cycles")
 
     args = parser.parse_args()
+
+    # Generate/load operator credentials automatically for commands that create or
+    # operate an assessment. Doctor/config/model inspection remain side-effect free.
+    if args.command in (None, "chat", "run", "eval", "serve", "start"):
+        try:
+            ensure_security_secrets()
+        except (OSError, PermissionError, RuntimeError) as exc:
+            console.print(f"[bold red]Security bootstrap failed:[/bold red] {exc}")
+            return
 
     # Route subcommands
     if args.command in ("setup", "onboard"):
