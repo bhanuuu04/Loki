@@ -148,6 +148,10 @@ class AssessmentStore:
             session.assets[asset.identifier] = asset
             self.save_assessment(session)
 
+    def get_evidence(self, session_id: str, evidence_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a recorded tool output without crossing assessment boundaries."""
+        return self.db.get_evidence(session_id=session_id, evidence_id=evidence_id)
+
     def index_evidence(
         self,
         session_id: str,
