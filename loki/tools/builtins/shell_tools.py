@@ -10,7 +10,7 @@ from loki.executor.isolation import IsolatedExecutionEngine
 
 @tool(
     name="run_command",
-    description="Execute a shell command with strict sandbox isolation (Docker or restricted subprocess) and return stdout, stderr, and exit code.",
+    description="Execute a shell command inside a Docker sandbox with resource limits and bounded output. Refuses execution when Docker isolation is unavailable.",
     capabilities=[ToolCapability.SYSTEM, ToolCapability.SHELL],
 )
 async def run_command(command: str, timeout_seconds: int = 30) -> str:
