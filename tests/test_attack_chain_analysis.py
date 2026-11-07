@@ -33,6 +33,7 @@ def _record(evidence_id, evidence):
         "session_id": "assessment-1",
         "raw_output": raw_output,
         "output_hash": hashlib.sha256(raw_output.encode()).hexdigest(),
+        "metadata": {"authorized": True},
     }
 
 
