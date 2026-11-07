@@ -160,3 +160,32 @@ def test_dns_observed_ip_is_explained_but_not_authorized_for_direct_testing(monk
     # Observation of a domain's DNS answer does not authorize direct IP testing.
     allowed, _ = scope.is_in_scope("203.0.113.17", check_dns=False)
     assert not allowed
+
+
+
+def test_origin_candidate_requires_explicit_scope_addition(monkeypatch):
+    import ipaddress
+
+    scope = ScopeManager(
+        ScopeConfig(
+            assessment_name="Origin Candidate Scope",
+            targets=["example.com"],
+            allow_subdomains=True,
+        )
+    )
+    candidate_ip = ipaddress.ip_address("198.51.100.27")
+    monkeypatch.setattr(scope, "_resolve_host", lambda _host: [candidate_ip])
+
+    # Discovering an address associated with an authorized hostname is passive evidence only.
+    assert scope.dns_observation_owner(str(candidate_ip)) == "example.com"
+    allowed_before, _ = scope.is_in_scope(str(candidate_ip), check_dns=False)
+    assert not allowed_before
+
+    # The operator explicitly adds the IP before active origin validation can target it.
+    scope.update_targets(
+        add_targets=[str(candidate_ip)],
+        author="operator",
+        reason="Approved candidate origin for direct validation",
+    )
+    allowed_after, _ = scope.is_in_scope(str(candidate_ip), check_dns=False)
+    assert allowed_after
