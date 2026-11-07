@@ -49,6 +49,9 @@ NO_RESULT_MARKERS = (
     "couldn't resolve",
     "resolution failed",
     "no addresses",
+    "not available",
+    "not installed",
+    "command not found",
     "zero results",
     "0 results",
     "not verified",
@@ -289,12 +292,13 @@ class ToolPerformanceMemory:
         with self._lock:
             stats = self._data.get("tasks", {}).get(task_type, {})
             original = list(dict.fromkeys(names))
+            original_rank = {name: index for index, name in enumerate(original)}
             return sorted(
                 original,
                 key=lambda name: (
                     -self.score(stats.get(name, {})),
                     -sum(int(stats.get(name, {}).get(k, 0) or 0) for k in ("success", "partial")),
-                    name.lower(),
+                    original_rank[name],
                 ),
             )
 
