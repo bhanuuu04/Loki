@@ -556,6 +556,10 @@ def record_finding(
     if not evidence_record:
         return "Finding rejected: evidence_record_id does not identify a stored record in this assessment."
 
+    record_metadata = evidence_record.get("metadata") or {}
+    if record_metadata.get("authorized") is not True:
+        return "Finding rejected: the referenced tool result is not marked as authorized by Loki's execution gateway."
+
     raw_output = str(evidence_record.get("raw_output") or "")
     stored_hash = str(evidence_record.get("output_hash") or "")
     actual_hash = hashlib.sha256(raw_output.encode("utf-8", errors="replace")).hexdigest()
