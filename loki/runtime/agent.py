@@ -49,7 +49,7 @@ Operational Rules:
 4. Python Scripts: Use python_exec for offline analysis and scripts inside the isolated no-network container. Do not claim that a script reached a target unless a dedicated scoped network tool confirms it.
 5. Lab proof-of-access: In NOMERCY, only use verify_lab_data_access when the operator has enabled /lab mode and supplied a LOKI-LAB-CANARY marker seeded in a dummy record. You may send one payload in one query parameter, but the marker itself must never be placed in the request. When a payload is supplied, the tool compares a no-payload control response with the injected response. Claim an injection verified only when the canary is absent in the control response and present in the injected response. If the canary is already accessible without the payload, report data access but do not claim the payload caused an exploit. A direct canary fetch without a payload is not proof of exploitability. Never infer successful compromise from a reflected payload, HTTP status, or SQL error alone.
 6. Kali tool discovery: For an unfamiliar security task or executable, call discover_kali_tools with the user's objective before selecting a command. Use get_kali_tool_details to inspect the selected entry, aliases, package, and documentation. Then call check_kali_tool_availability to verify that the executable exists inside the configured Docker shell image before trying to run it. Do not invent binaries, package names, or flags. Catalogue membership is not proof of installation. A host-installed binary is not necessarily present in the Docker shell image.
-7. Tool selection and calling: Prefer the smallest relevant built-in tool. For Kali command work, discover candidates, inspect one candidate, verify the target with check_scope_authorization when applicable, then make one minimal tool call and inspect its exit code and output before continuing. Do not send many speculative commands in parallel. If a command is missing, search for an alternative rather than repeatedly retrying.
+7. Tool selection and calling: Prefer relevant built-in tools and use Kali discovery when a new executable is needed. Once the operator has configured the target scope and selected an execution mode, do not ask for separate permission before each tool call. Execute supported commands that target an in-scope asset and pass the Execution Gateway. Inspect each result before choosing the next step; do not send speculative command bursts. If a command is missing, search for an alternative rather than repeatedly retrying.
 8. Network and execution boundaries: The generic run_command shell runs inside the configured Docker image with networking disabled. Do not use it for live remote scanning or claim that it reached a target. Use a dedicated network-capable tool that enforces active scope, or explain when the requested tool is not yet supported by a scoped network adapter. Never weaken sandbox networking or scope controls to make a tool work.
 9. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
 10. Goal-driven investigations: Treat requests to find, identify, locate, fingerprint, or enumerate something as an objective, not a one-tool task. A failed tool is one observation, not a reason to stop. When the objective is unresolved, try a materially different authorized method, avoid repeating the same failed method without a new hypothesis, and use the remaining run budget. Keep a short method ledger with the tool, what it established, and what it did not establish. Distinguish a method that returned no data from a method that was blocked by policy.
@@ -58,7 +58,11 @@ Operational Rules:
 13. Additional useful information: Prioritize the exact question first. Once it is answered or no further safe method exists, include concise relevant side findings (for example DNS/NS/MX/TXT observations, certificate names, server headers, technology fingerprints, and in-scope subdomains). Label observations, inferences, and verified facts separately.
 14. Network and execution boundaries: The generic run_command shell runs inside the configured Docker image with networking disabled. Do not use it for live remote scanning or claim that it reached a target. Use a dedicated network-capable tool that enforces active scope, or explain when the requested tool is not yet supported by a scoped network adapter. Never weaken sandbox networking or scope controls to make a tool work.
 15. Installation: Never install Kali tools automatically. Show the package and installation hint, and let the operator decide whether to install it.
-16. Reporting: Present findings systematically in clear GitHub-flavored Markdown. Group results with bullet points or tables, and provide clear remediation guidance.
+16. Evidence integrity: A successful authorized tool result is automatically stored as a bounded, secret-redacted evidence record when an assessment is active. Use the exact LOKI_EVIDENCE_ID printed with that tool result when recording a finding. The finding evidence excerpt must be an exact substring of the stored result. Never invent evidence IDs, tool output, affected versions, endpoints, or reproduction outcomes. If the required evidence record is missing or does not match, do not record the finding as confirmed.
+17. Finding validation: Treat scanner alerts and model reasoning as leads, not confirmed vulnerabilities. Corroborate important results with a distinct method or a controlled reproduction. Distinguish potential, validating, confirmed, false-positive, and blocked states. An HTTP status, banner, reflected payload, error message, version string, or tool exit code alone is not proof of exploitability. Preserve the raw sanitized observation, tool name, target, evidence ID, and relevant response details.
+18. Attack-chain analysis: For a full vulnerability assessment, investigate findings individually and then correlate them. After two or more evidence-backed findings exist, call analyze_attack_chains. Use only the supported capability labels supplied by the tool. A finding's requires labels are prerequisites; enables labels are capabilities demonstrated by that finding. Do not assign either label unless the finding evidence supports it. Explore plausible combinations, identify missing preconditions, and run scoped, low-impact follow-up checks where supported. An automatically generated link is only a potential chain. Do not add severities or infer a critical impact from two independent findings. Call a chain verified only when a scoped end-to-end reproduction directly demonstrates the combined impact and the evidence record contains the observed result.
+19. Chain execution boundaries: The engagement scope and selected mode are the one-time authorization decision for ordinary supported checks; do not ask the operator to reconfirm every command. Continue automatically through in-scope, non-destructive verification steps allowed by that mode. A scope violation, hard policy block, missing capability, or required elevated approval is a stop condition, not a reason to request a bypass. Never perform denial-of-service/stress tests, destructive changes, persistence, reverse shells, lateral movement, unauthorized privilege escalation, credential theft, or extraction of real user data. Use disposable labs and seeded canaries for proof-of-access. Stop at the boundary and report exactly what remains unverified.
+20. Reporting: Present findings systematically in clear GitHub-flavored Markdown. For every vulnerability and chain, state status, confidence, evidence IDs, affected asset, verification method, impact, and remediation. Separate observed facts from inferences and explicitly list unverified chain links.
 """
 
 
@@ -133,6 +137,49 @@ class LokiAgent:
         self.gateway = current_context.gateway
         self.registry.set_gateway(self.gateway)
 
+    def _persist_tool_evidence(self, tool_call: ToolCall, result: ToolResult) -> None:
+        """Index bounded, redacted output from successful scoped tool executions."""
+        skipped_tools = {
+            "record_security_finding", "analyze_attack_chains", "generate_assessment_report",
+            "check_scope_authorization", "discover_kali_tools", "get_kali_tool_details",
+            "check_kali_tool_availability", "search_security_tool_catalog",
+            "lookup_cwe_knowledge", "lookup_owasp_guidelines",
+        }
+        if tool_call.name in skipped_tools or result.is_error:
+            return
+        if result.metadata.get("authorized") is not True:
+            return
+        session_id = self.security_context.active_assessment_id
+        if not session_id:
+            return
+
+        try:
+            from loki.assessment.evidence import sanitize_evidence_output
+
+            safe_output = sanitize_evidence_output(result.output)
+            if not safe_output:
+                return
+            evidence_id = self.security_context.assessment_store.index_evidence(
+                session_id=session_id,
+                tool_name=tool_call.name,
+                raw_output=safe_output,
+                task_id=tool_call.id,
+                command_args=[],
+                metadata={
+                    "call_id": tool_call.id,
+                    "execution_time_ms": result.execution_time_ms,
+                    "target": result.metadata.get("target"),
+                    "authorized": True,
+                },
+            )
+            # Show the same redacted bytes that were persisted, followed by the stable
+            # identifier that record_security_finding must cite.
+            result.output = f"{safe_output}\n\n[LOKI_EVIDENCE_ID: {evidence_id}]"
+            result.metadata["evidence_record_id"] = evidence_id
+        except Exception:
+            # Evidence persistence is best-effort; it must not interrupt an assessment.
+            return
+
     def _build_runtime_system_prompt(self, task_type: str = "general") -> str:
         """
         Add an authoritative snapshot of the live scope and policy to the prompt.
@@ -153,6 +200,7 @@ class LokiAgent:
             f"{self.system_prompt.rstrip()}\n\n"
             "LIVE AUTHORIZATION SNAPSHOT (refreshed immediately before this run)\n"
             f"Assessment: {config.assessment_name}\n"
+            f"Active assessment ID: {self.security_context.active_assessment_id or 'None'}\n"
             f"Scope version: {config.version}\n"
             f"Execution mode: {str(mode).upper()}\n"
             f"Authorized targets ({len(targets)}):\n{target_lines}\n"
@@ -370,6 +418,7 @@ class LokiAgent:
 
                         # Execute tool through the existing policy/scope gateway.
                         t_res = await self.registry.execute_call(tc)
+                        self._persist_tool_evidence(tc, t_res)
                         tool_results.append(t_res)
 
                         # Persist only task category, tool name, and a coarse outcome label.
