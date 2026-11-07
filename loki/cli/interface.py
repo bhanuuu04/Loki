@@ -213,7 +213,7 @@ class LokiConversationalCLI:
         left_text = (
             f" [dim]Provider:[/dim] [bold green]{self.provider_name}[/bold green]\n"
             f" [dim]AI Model:[/dim] [bold cyan]{self.model_name}[/bold cyan]\n"
-            f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]\\n"
+            f" [dim]Policy Mode:[/dim] [bold yellow]{self.mode.value.upper()}[/bold yellow]\n"
             f" [dim]Lab Verification:[/dim] [bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]{'ENABLED' if self.scope_manager.config.lab_mode_enabled else 'disabled'}[/bold {'green' if self.scope_manager.config.lab_mode_enabled else 'dim'}]"
         )
 
@@ -222,6 +222,7 @@ class LokiConversationalCLI:
         right_text = (
             f" [dim]Target Scope:[/dim] [bold green]{targets_count} Authorized[/bold green]\n"
             f" [dim]Execution Gateway:[/dim] [bold green]ENFORCED (Single Choke-Point)[/bold green]\n"
+            f" [dim]Lab Verification:[/dim] [bold]{'ENABLED' if self.scope_manager.config.lab_mode_enabled else 'disabled'}[/bold]\n"
             f" [dim]Session ID:[/dim] [dim]{self.session_id}[/dim]"
         )
 
