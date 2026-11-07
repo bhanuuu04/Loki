@@ -97,7 +97,7 @@ A finding's `enables` list describes a capability its evidence demonstrates. A f
 
 ### What a candidate means
 
-A candidate is a hypothesis that the findings may compose. It does not establish exploitability, sequence feasibility, causality, or impact. The chain output includes the finding sequence, matched capability, affected assets, and evidence record IDs.
+A candidate is a hypothesis that the findings may compose. It does not establish exploitability, sequence feasibility, causality, or impact. The chain output includes the finding sequence, matched capability, affected assets, and evidence record IDs. Loki should identify missing preconditions and run supported, low-impact follow-up checks within the active scope.
 
 Loki must not:
 - Add individual CVSS scores or severities.
