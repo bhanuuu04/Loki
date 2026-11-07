@@ -92,6 +92,8 @@ class IsolatedExecutionEngine:
             if not terminated:
                 terminated = True
                 await cls._kill_container(container_name)
+                if proc.returncode is None:
+                    await cls.kill_process_tree(proc.pid)
 
         async def read_limited(stream: asyncio.StreamReader) -> bytes:
             nonlocal output_limited
