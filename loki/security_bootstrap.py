@@ -31,10 +31,11 @@ def get_security_env_path() -> Path:
 
 
 def _check_path(path: Path) -> None:
-    if path.is_symlink():
-        raise PermissionError(f"Refusing to use a symbolic link for Loki security secrets: {path}")
-    if path.parent.exists() and path.parent.is_symlink():
-        raise PermissionError(f"Refusing to use a symbolic-link directory for Loki security secrets: {path.parent}")
+    for candidate in (path, *path.parents):
+        if candidate.exists() and candidate.is_symlink():
+            raise PermissionError(
+                f"Refusing to use a symbolic link in the Loki security path: {candidate}"
+            )
 
 
 def load_security_environment() -> Path:
