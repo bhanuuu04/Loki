@@ -164,8 +164,14 @@ def cli_entrypoint() -> None:
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host interface")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to bind")
 
-    # Command: tools (list tools)
-    subparsers.add_parser("tools", help="List all registered tools in catalog")
+    # Command: tools (inspect runtime tools and the synced Kali catalogue)
+    tools_parser = subparsers.add_parser("tools", help="Discover registered tools and Kali Linux tools")
+    tools_parser.add_argument("--sync-kali", action="store_true", help="Download and cache Kali's official All Tools index")
+    tools_parser.add_argument("--search", "-s", default="", help="Search Kali tools by objective, name, package, or binary")
+    tools_parser.add_argument("--category", default=None, help="Filter by category, e.g. web_application or wireless")
+    tools_parser.add_argument("--installed-only", action="store_true", help="Show only Kali binaries detected on the Loki host")
+    tools_parser.add_argument("--details", default=None, help="Show details for a tool, package, or executable alias")
+    tools_parser.add_argument("--limit", type=int, default=20, help="Maximum catalogue results (1-20)")
 
     # Command: eval (benchmarks)
     eval_parser = subparsers.add_parser("eval", help="Run benchmark evaluation suites")
@@ -250,11 +256,86 @@ def cli_entrypoint() -> None:
         asyncio.run(_run_eval(args.suite, args.provider))
 
     elif args.command == "tools":
+        from loki.knowledge.tool_registry.kali_catalog import KaliToolIndex
+
+        index = KaliToolIndex()
+        if args.sync_kali:
+            try:
+                metadata = index.sync_from_kali()
+                console.print(
+                    f"[bold green]Kali catalogue synced successfully: "
+                    f"{metadata['tool_count']} tool entries.[/bold green]"
+                )
+                console.print(f"[dim]Source: {metadata['source_url']}[/dim]")
+                console.print(f"[dim]Cached at: {index.cache_path}[/dim]")
+            except Exception as exc:
+                console.print(f"[bold red]Kali catalogue sync failed:[/bold red] {exc}")
+                if index.records:
+                    console.print(
+                        f"[yellow]The previous cache is still available "
+                        f"({len(index.records)} entries).[/yellow]"
+                    )
+            return
+
+        if args.details:
+            item = index.get_tool(args.details)
+            if not item:
+                console.print(f"[yellow]No Kali catalogue entry found for '{args.details}'.[/yellow]")
+                return
+            console.print(Panel(
+                f"[bold]{item['name']}[/bold] ({item['category']})\n\n"
+                f"{item.get('local_package_description') or item['summary']}\n\n"
+                f"Packages: {', '.join(item['packages']) or 'not listed'}\n"
+                f"Executables: {', '.join(item['binaries']) or 'not listed'}\n"
+                f"Host path: {item['installed_path'] or 'not detected'}\n"
+                f"Install hint: {item['install_hint']}\n"
+                f"Documentation: {item['documentation_url'] or item['source_url']}",
+                title="Kali tool details",
+                border_style="cyan",
+            ))
+            return
+
+        if args.search or args.category or args.installed_only:
+            matches = index.search(
+                query=args.search,
+                category=args.category,
+                installed_only=args.installed_only,
+                limit=args.limit,
+            )
+            table = Table(title=f"Kali Tool Search ({len(matches)} results)", box=box.SIMPLE)
+            table.add_column("Tool", style="green")
+            table.add_column("Category")
+            table.add_column("Host Status")
+            table.add_column("Package(s)")
+            table.add_column("Executable aliases")
+            for item in matches:
+                table.add_row(
+                    item["name"],
+                    item["category"],
+                    "Installed" if item["is_installed"] else "Not detected",
+                    ", ".join(item["packages"][:3]) or "—",
+                    ", ".join(item["binaries"][:4]) or "—",
+                )
+            console.print(table)
+            if not index.records:
+                console.print("[yellow]No cached Kali index. Run loki tools --sync-kali first.[/yellow]")
+            else:
+                console.print(f"[dim]Searches {len(index.records)} cached Kali source entries. Host detection does not verify availability inside the Docker image.[/dim]")
+            return
+
         agent = LokiAgent()
-        tools = agent.registry.list_tools()
-        console.print(f"\n[bold cyan]Registered Tools ({len(tools)}):[/bold cyan]")
-        for t in tools:
-            console.print(f" • [bold green]{t.name}[/bold green]: {t.description}")
+        runtime_tools = agent.registry.list_tools()
+        console.print(f"\n[bold cyan]Registered Runtime Tools ({len(runtime_tools)}):[/bold cyan]")
+        for runtime_tool in runtime_tools:
+            console.print(f" • [bold green]{runtime_tool.name}[/bold green]: {runtime_tool.description}")
+        if index.records:
+            console.print(
+                f"\n[bold cyan]Kali Catalogue:[/bold cyan] {len(index.records)} cached source entries."
+            )
+        else:
+            console.print(
+                "\n[yellow]Kali catalogue not synced. Run: loki tools --sync-kali[/yellow]"
+            )
         console.print("")
 
     else:
