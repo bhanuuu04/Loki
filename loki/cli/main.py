@@ -209,7 +209,7 @@ def cli_entrypoint() -> None:
         console.print("\n[bold cyan]─── LOKI ACTIVE CONFIGURATION ───[/bold cyan]")
         cfg = settings.model_dump()
         for k, v in cfg.items():
-            if "api_key" in k and v:
+            if any(marker in k.lower() for marker in ("api_key", "token", "secret", "password", "signing")) and v:
                 v = f"********{v[-4:]}" if len(str(v)) > 4 else "********"
             console.print(f" [bold]{k}:[/bold] {v}")
         console.print("")
