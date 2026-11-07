@@ -42,8 +42,12 @@ async def test_tool_execution():
 
 def test_python_exec_isolated_subprocess():
     from loki.tools.builtins.python_tools import python_exec
+    from loki.executor.isolation import IsolatedExecutionEngine
     output = python_exec("print('isolated_calc:', 12 * 12)")
-    assert "isolated_calc: 144" in output
+    if not IsolatedExecutionEngine.is_docker_available():
+        assert "Execution refused" in output
+    else:
+        assert "isolated_calc: 144" in output
 
 
 @pytest.mark.asyncio
@@ -90,4 +94,4 @@ async def test_shell_execution_fails_closed_without_docker(monkeypatch):
     result = await IsolatedExecutionEngine.execute_shell("echo must-not-run")
     assert result.backend == IsolationBackend.UNAVAILABLE
     assert result.exit_code != 0
-    assert "Host" in result.stderr
+    assert "host" in result.stderr.lower()
